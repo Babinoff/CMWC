@@ -78,27 +78,24 @@ const cleanJson = (text: string | undefined) => {
   return text.replace(/```json/g, '').replace(/```/g, '').trim();
 };
 
-const getRankColor = (rank: number) => {
-  switch(rank) {
-    case 1: return "var(--rank-1)";
-    case 2: return "var(--rank-2)";
-    case 3: return "var(--rank-3)";
-    case 4: return "var(--rank-4)";
-    case 5: return "var(--rank-5)";
-    case 6: return "var(--rank-6)";
-    default: return "#fff";
+const getDisciplineStyle = (d: Discipline) => {
+  // Override for VK and OV to have unified colors
+  if (d.code.startsWith("ВК")) {
+    return { bg: "#bae6fd", text: "#0369a1" }; // Light Sky Blue
   }
-};
+  if (d.code.startsWith("ОВ")) {
+    return { bg: "#fed7aa", text: "#c2410c" }; // Light Orange
+  }
 
-const getRankTextColor = (rank: number) => {
-  switch(rank) {
-    case 1: return "var(--rank-1-text)";
-    case 2: return "var(--rank-2-text)";
-    case 3: return "var(--rank-3-text)";
-    case 4: return "var(--rank-4-text)";
-    case 5: return "var(--rank-5-text)";
-    case 6: return "var(--rank-6-text)";
-    default: return "#000";
+  // Fallback to Rank defaults
+  switch(d.rank) {
+    case 1: return { bg: "var(--rank-1)", text: "var(--rank-1-text)" };
+    case 2: return { bg: "var(--rank-2)", text: "var(--rank-2-text)" };
+    case 3: return { bg: "var(--rank-3)", text: "var(--rank-3-text)" };
+    case 4: return { bg: "var(--rank-4)", text: "var(--rank-4-text)" };
+    case 5: return { bg: "var(--rank-5)", text: "var(--rank-5-text)" };
+    case 6: return { bg: "var(--rank-6)", text: "var(--rank-6-text)" };
+    default: return { bg: "#fff", text: "#000" };
   }
 };
 
@@ -320,6 +317,18 @@ const Input = (props: any) => (
   />
 );
 
+const ToggleButton = ({ open, onClick }: { open: boolean, onClick: () => void }) => (
+    <button 
+        onClick={onClick}
+        className="p-1 rounded hover:bg-gray-200 text-gray-500 transition-colors focus:outline-none"
+        title={open ? "Collapse Panel" : "Expand Panel"}
+    >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform duration-200 ${open ? 'rotate-180' : 'rotate-0'}`}>
+            <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>
+    </button>
+);
+
 // --- Main App ---
 
 export default function App() {
@@ -328,8 +337,21 @@ export default function App() {
   
   // "Database"
   const [settings, setSettings] = useState<AppSettings>({ apiKey: process.env.API_KEY || "", model: "gemini-2.5-flash" });
-  const [works, setWorks] = useState<WorkItem[]>([]);
-  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  
+  // Initialize from LocalStorage
+  const [works, setWorks] = useState<WorkItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("cmwc_works");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [scenarios, setScenarios] = useState<Scenario[]>(() => {
+    try {
+      const saved = localStorage.getItem("cmwc_scenarios");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // Selection State
@@ -342,11 +364,21 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [minScope, setMinScope] = useState(0.7);
   const [workToAddId, setWorkToAddId] = useState("");
+  const [panelOpen, setPanelOpen] = useState(true);
 
   // Init LLM
   useEffect(() => {
     llmService.init(settings.apiKey, settings.model);
   }, [settings]);
+
+  // Persistence Effects
+  useEffect(() => {
+    localStorage.setItem("cmwc_works", JSON.stringify(works));
+  }, [works]);
+
+  useEffect(() => {
+    localStorage.setItem("cmwc_scenarios", JSON.stringify(scenarios));
+  }, [scenarios]);
 
   // Logger
   const addLog = (action: string, status: "success" | "error", details: string, tokens: number = 0) => {
@@ -366,6 +398,7 @@ export default function App() {
   const handleLoadWorks = async () => {
     if (!urlInput || !selectedRowId) return;
     setLoading(true);
+    setPanelOpen(true);
     try {
       // 1. Parse (Simulated)
       const { works: rawWorks, tokens: t1 } = await llmService.parseWorks(urlInput, DISCIPLINES);
@@ -413,6 +446,7 @@ export default function App() {
   const handleGenScenarios = async () => {
     if (!selectedCell) return;
     setLoading(true);
+    setPanelOpen(true);
     try {
       const rDisc = DISCIPLINES.find(d => d.id === selectedCell.r)!;
       const cDisc = DISCIPLINES.find(d => d.id === selectedCell.c)!;
@@ -536,24 +570,39 @@ export default function App() {
         <div className="sticky top-0 left-0 z-30 bg-gray-100 p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm">
           Category
         </div>
-        {DISCIPLINES.map(d => (
-          <div key={d.id} className="sticky top-0 z-20 bg-gray-50 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm" style={{ backgroundColor: getRankColor(d.rank) }}>
-            <span className="font-bold" style={{ color: getRankTextColor(d.rank) }}>{d.code}</span>
-            <span className="text-[10px] leading-tight mt-1 text-gray-600 max-w-[90px] truncate" title={d.name}>{d.name}</span>
-          </div>
-        ))}
+        {DISCIPLINES.map(d => {
+            const style = getDisciplineStyle(d);
+            return (
+                <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm" style={{ backgroundColor: style.bg }}>
+                    <span className="font-bold" style={{ color: style.text }}>{d.code}</span>
+                    <span className="text-[10px] leading-tight mt-1 text-gray-600 max-w-[90px] truncate" title={d.name}>{d.name}</span>
+                </div>
+            );
+        })}
 
         {/* Rows */}
-        {DISCIPLINES.map(r => (
+        {DISCIPLINES.map(r => {
+          const style = getDisciplineStyle(r);
+          return (
           <React.Fragment key={r.id}>
             {/* Row Label */}
             <div 
               className={`sticky left-0 z-10 p-3 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors
                 ${selectedRowId === r.id && type === 'collision' ? 'ring-inset ring-2 ring-blue-500' : ''}`}
-              onClick={() => type === 'collision' && setSelectedRowId(r.id)}
-              style={{ backgroundColor: getRankColor(r.rank) }}
+              onClick={() => {
+                  if (type === 'collision') {
+                      if (selectedRowId === r.id) {
+                          // Toggle if same row clicked
+                          setPanelOpen(!panelOpen);
+                      } else {
+                          setSelectedRowId(r.id);
+                          setPanelOpen(true);
+                      }
+                  }
+              }}
+              style={{ backgroundColor: style.bg }}
             >
-               <span style={{ color: getRankTextColor(r.rank) }}>{r.code}</span>
+               <span style={{ color: style.text }}>{r.code}</span>
                <span className="text-[10px] font-normal text-gray-600 truncate max-w-full" title={r.name}>{r.name}</span>
             </div>
 
@@ -584,8 +633,13 @@ export default function App() {
                         ${isSelected ? 'bg-blue-100 ring-inset ring-2 ring-blue-600 z-0' : 'hover:bg-gray-50'}
                     `}
                     onClick={() => {
-                        setSelectedCell({r: r.id, c: c.id});
-                        setSelectedScenarioId(null);
+                        if (selectedCell?.r === r.id && selectedCell?.c === c.id) {
+                            setPanelOpen(!panelOpen);
+                        } else {
+                            setSelectedCell({r: r.id, c: c.id});
+                            setSelectedScenarioId(null);
+                            setPanelOpen(true);
+                        }
                     }}
                    >
                      {costData ? (
@@ -601,7 +655,7 @@ export default function App() {
               }
             })}
           </React.Fragment>
-        ))}
+        )})}
       </div>
     </div>
   );
@@ -691,72 +745,91 @@ export default function App() {
         {activeTab === "collision" && (
           <div className="h-full flex flex-col gap-4">
             {/* Matrix View */}
-            <div className="flex-1 min-h-0 flex flex-col">
-                <h2 className="text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Rank Matrix</h2>
+            <div className={`flex flex-col transition-all duration-300 ease-in-out ${selectedRowId && panelOpen ? 'h-1/2' : 'h-full'}`}>
+                <h2 className="text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider flex justify-between items-center">
+                    <span>Rank Matrix</span>
+                    {selectedRowId && <span className="text-xs font-normal text-gray-400">Click row header to toggle drawer</span>}
+                </h2>
                 {renderMatrix("collision")}
             </div>
 
             {/* Works Drawer */}
             {selectedRowId && (
-                <div className="h-1/2 bg-white border rounded shadow-lg flex flex-col animate-in slide-in-from-bottom-10 ring-1 ring-black/5">
-                    <div className="p-3 border-b bg-gray-50 flex justify-between items-center">
-                        <h3 className="font-semibold text-gray-700 flex items-center gap-2">
-                            Works: {DISCIPLINES.find(d => d.id === selectedRowId)?.code} - {DISCIPLINES.find(d => d.id === selectedRowId)?.name}
-                        </h3>
-                        <span className="text-xs font-mono bg-gray-200 px-2 py-1 rounded">
-                             Rank {DISCIPLINES.find(d => d.id === selectedRowId)?.rank}
-                        </span>
-                    </div>
-                    <div className="flex-1 overflow-auto p-0">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-gray-50 text-gray-500 font-medium sticky top-0 z-10">
-                                <tr>
-                                    <th className="p-3 border-b">Name</th>
-                                    <th className="p-3 border-b">Price</th>
-                                    <th className="p-3 border-b">Unit</th>
-                                    <th className="p-3 border-b">Source</th>
-                                    <th className="p-3 border-b">Score</th>
-                                    <th className="p-3 border-b">Status</th>
-                                    <th className="p-3 border-b text-right">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y">
-                                {works.filter(w => w.categoryId === selectedRowId).map(w => (
-                                    <tr key={w.id} className="hover:bg-gray-50 group">
-                                        <td className="p-3">{w.name}</td>
-                                        <td className="p-3 font-mono">${w.price}</td>
-                                        <td className="p-3 text-gray-500">{w.unit}</td>
-                                        <td className="p-3 text-xs text-gray-400 truncate max-w-[100px]">{w.source}</td>
-                                        <td className="p-3">
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-16 h-1.5 bg-gray-200 rounded overflow-hidden">
-                                                    <div className={`h-full ${w.score > 0.7 ? 'bg-green-500' : 'bg-yellow-500'}`} style={{width: `${w.score * 100}%`}}/>
-                                                </div>
-                                                <span className="text-xs">{w.score.toFixed(2)}</span>
-                                            </div>
-                                        </td>
-                                        <td className="p-3">
-                                            <span className={`px-2 py-0.5 rounded text-xs font-medium capitalize
-                                                ${w.status === 'accepted' ? 'bg-green-100 text-green-800' : 
-                                                  w.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                                                {w.status}
-                                            </span>
-                                        </td>
-                                        <td className="p-3 text-right">
-                                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => setWorks(prev => prev.map(wk => wk.id === w.id ? {...wk, status: 'accepted'} : wk))} className="text-green-600 hover:bg-green-100 p-1 rounded transition-colors">✓</button>
-                                                <button onClick={() => setWorks(prev => prev.map(wk => wk.id === w.id ? {...wk, status: 'rejected'} : wk))} className="text-red-600 hover:bg-red-100 p-1 rounded transition-colors">✕</button>
-                                            </div>
-                                        </td>
+                <>
+                    {!panelOpen && (
+                         <div 
+                            className="bg-white border rounded shadow p-2 flex justify-between items-center cursor-pointer hover:bg-gray-50"
+                            onClick={() => setPanelOpen(true)}
+                         >
+                             <span className="text-sm font-semibold text-gray-600">
+                                Works: {DISCIPLINES.find(d => d.id === selectedRowId)?.code} ({works.filter(w => w.categoryId === selectedRowId).length} items)
+                             </span>
+                             <ToggleButton open={false} onClick={() => setPanelOpen(true)} />
+                         </div>
+                    )}
+                    <div className={`bg-white border rounded shadow-lg flex flex-col transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden border-0'}`}>
+                        <div className="p-3 border-b bg-gray-50 flex justify-between items-center">
+                            <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+                                Works: {DISCIPLINES.find(d => d.id === selectedRowId)?.code} - {DISCIPLINES.find(d => d.id === selectedRowId)?.name}
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-mono bg-gray-200 px-2 py-1 rounded">
+                                    Rank {DISCIPLINES.find(d => d.id === selectedRowId)?.rank}
+                                </span>
+                                <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-auto p-0">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-50 text-gray-500 font-medium sticky top-0 z-10">
+                                    <tr>
+                                        <th className="p-3 border-b">Name</th>
+                                        <th className="p-3 border-b">Price</th>
+                                        <th className="p-3 border-b">Unit</th>
+                                        <th className="p-3 border-b">Source</th>
+                                        <th className="p-3 border-b">Score</th>
+                                        <th className="p-3 border-b">Status</th>
+                                        <th className="p-3 border-b text-right">Action</th>
                                     </tr>
-                                ))}
-                                {works.filter(w => w.categoryId === selectedRowId).length === 0 && (
-                                    <tr><td colSpan={7} className="p-8 text-center text-gray-400">No works loaded. Enter URL and click Load.</td></tr>
-                                )}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {works.filter(w => w.categoryId === selectedRowId).map(w => (
+                                        <tr key={w.id} className="hover:bg-gray-50 group">
+                                            <td className="p-3">{w.name}</td>
+                                            <td className="p-3 font-mono">${w.price}</td>
+                                            <td className="p-3 text-gray-500">{w.unit}</td>
+                                            <td className="p-3 text-xs text-gray-400 truncate max-w-[100px]">{w.source}</td>
+                                            <td className="p-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-16 h-1.5 bg-gray-200 rounded overflow-hidden">
+                                                        <div className={`h-full ${w.score > 0.7 ? 'bg-green-500' : 'bg-yellow-500'}`} style={{width: `${w.score * 100}%`}}/>
+                                                    </div>
+                                                    <span className="text-xs">{w.score.toFixed(2)}</span>
+                                                </div>
+                                            </td>
+                                            <td className="p-3">
+                                                <span className={`px-2 py-0.5 rounded text-xs font-medium capitalize
+                                                    ${w.status === 'accepted' ? 'bg-green-100 text-green-800' : 
+                                                    w.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                                    {w.status}
+                                                </span>
+                                            </td>
+                                            <td className="p-3 text-right">
+                                                <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button onClick={() => setWorks(prev => prev.map(wk => wk.id === w.id ? {...wk, status: 'accepted'} : wk))} className="text-green-600 hover:bg-green-100 p-1 rounded transition-colors">✓</button>
+                                                    <button onClick={() => setWorks(prev => prev.map(wk => wk.id === w.id ? {...wk, status: 'rejected'} : wk))} className="text-red-600 hover:bg-red-100 p-1 rounded transition-colors">✕</button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {works.filter(w => w.categoryId === selectedRowId).length === 0 && (
+                                        <tr><td colSpan={7} className="p-8 text-center text-gray-400">No works loaded. Enter URL and click Load.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </div>
+                </>
             )}
           </div>
         )}
@@ -765,173 +838,189 @@ export default function App() {
         {activeTab === "cost" && (
              <div className="h-full flex flex-col gap-4">
                  {/* Matrix */}
-                 <div className="flex-1 min-h-0 flex flex-col">
-                     <h2 className="text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Cost Matrix</h2>
+                 <div className={`flex flex-col transition-all duration-300 ease-in-out ${selectedCell && panelOpen ? 'h-1/2' : 'h-full'}`}>
+                     <h2 className="text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider flex justify-between items-center">
+                        <span>Cost Matrix</span>
+                        {selectedCell && <span className="text-xs font-normal text-gray-400">Click cell to toggle detail panel</span>}
+                     </h2>
                      {renderMatrix("cost")}
                  </div>
 
                  {/* Scenarios & Scenario Works Split View */}
                  {selectedCell && (
-                     <div className="h-1/2 flex gap-4">
-                        {/* Scenarios List */}
-                        <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col">
-                            <div className="p-3 border-b bg-gray-50 font-semibold text-gray-700">Scenarios</div>
-                            <div className="flex-1 overflow-auto">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gray-50 text-gray-500 sticky top-0">
-                                        <tr>
-                                            <th className="p-3 text-left border-b">Name</th>
-                                            <th className="p-3 text-left border-b">Total Cost</th>
-                                            <th className="p-3 w-10 border-b"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
-                                        {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).map(s => (
-                                            <tr 
-                                                key={s.id} 
-                                                className={`cursor-pointer hover:bg-blue-50 ${selectedScenarioId === s.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''}`}
-                                                onClick={() => setSelectedScenarioId(s.id)}
-                                            >
-                                                <td className="p-3">
-                                                    <div className="font-medium">{s.name}</div>
-                                                    <div className="text-xs text-gray-500 truncate max-w-[200px]">{s.description}</div>
-                                                </td>
-                                                <td className="p-3 font-mono font-medium text-blue-700">
-                                                    ${calculateScenarioCost(s)}
-                                                </td>
-                                                <td className="p-3">
-                                                    <button className="text-red-400 hover:text-red-600" onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setScenarios(prev => prev.filter(x => x.id !== s.id));
-                                                        if(selectedScenarioId === s.id) setSelectedScenarioId(null);
-                                                    }}>×</button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                        {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).length === 0 && (
-                                             <tr><td colSpan={3} className="p-8 text-center text-gray-400">No scenarios generated. Click "Generate Scenarios" above.</td></tr>
-                                        )}
-                                    </tbody>
-                                </table>
+                     <>
+                        {!panelOpen && (
+                            <div className="bg-white border rounded shadow p-2 flex justify-between items-center cursor-pointer hover:bg-gray-50" onClick={() => setPanelOpen(true)}>
+                                <span className="text-sm font-semibold text-gray-600">
+                                    Scenarios: {DISCIPLINES.find(d => d.id === selectedCell.r)?.code} vs {DISCIPLINES.find(d => d.id === selectedCell.c)?.code}
+                                </span>
+                                <ToggleButton open={false} onClick={() => setPanelOpen(true)} />
                             </div>
-                        </div>
-
-                        {/* Scenario Works Detail & Editing */}
-                        <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col">
-                             {activeScenario ? (
-                                 <>
-                                    <div className="p-3 border-b bg-gray-50 space-y-3">
-                                        {/* Editable Header */}
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Scenario Name</label>
-                                            <Input 
-                                                value={activeScenario.name} 
-                                                onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, name: e.target.value} : s))}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Description</label>
-                                            <textarea 
-                                                className="w-full bg-white text-gray-900 border border-gray-300 rounded px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[60px]" 
-                                                rows={2} 
-                                                value={activeScenario.description} 
-                                                onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, description: e.target.value} : s))}
-                                            />
-                                        </div>
-                                    </div>
-
-                                    {/* Add Work Bar */}
-                                    <div className="p-2 border-b bg-gray-100 flex gap-2 items-center">
-                                        <select 
-                                            className="flex-1 bg-white text-gray-900 border border-gray-300 rounded px-2 py-2 text-xs focus:outline-none focus:border-blue-500"
-                                            value={workToAddId}
-                                            onChange={(e) => setWorkToAddId(e.target.value)}
-                                        >
-                                            <option value="">-- Select work to add manually --</option>
-                                            {availableWorksForScenario.map(w => (
-                                                <option key={w.id} value={w.id}>{w.name} (${w.price}/{w.unit})</option>
+                        )}
+                        <div className={`flex gap-4 transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden'}`}>
+                            {/* Scenarios List */}
+                            <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col">
+                                <div className="p-3 border-b bg-gray-50 font-semibold text-gray-700 flex justify-between items-center">
+                                    <span>Scenarios</span>
+                                    <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
+                                </div>
+                                <div className="flex-1 overflow-auto">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                                            <tr>
+                                                <th className="p-3 text-left border-b">Name</th>
+                                                <th className="p-3 text-left border-b">Total Cost</th>
+                                                <th className="p-3 w-10 border-b"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).map(s => (
+                                                <tr 
+                                                    key={s.id} 
+                                                    className={`cursor-pointer hover:bg-blue-50 ${selectedScenarioId === s.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''}`}
+                                                    onClick={() => setSelectedScenarioId(s.id)}
+                                                >
+                                                    <td className="p-3">
+                                                        <div className="font-medium">{s.name}</div>
+                                                        <div className="text-xs text-gray-500 truncate max-w-[200px]">{s.description}</div>
+                                                    </td>
+                                                    <td className="p-3 font-mono font-medium text-blue-700">
+                                                        ${calculateScenarioCost(s)}
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <button className="text-red-400 hover:text-red-600" onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setScenarios(prev => prev.filter(x => x.id !== s.id));
+                                                            if(selectedScenarioId === s.id) setSelectedScenarioId(null);
+                                                        }}>×</button>
+                                                    </td>
+                                                </tr>
                                             ))}
-                                        </select>
-                                        <Button onClick={handleAddManualWork} disabled={!workToAddId} className="py-1.5">Add</Button>
-                                        <div className="w-px h-6 bg-gray-300 mx-1"></div>
-                                        <Button variant="secondary" className="text-xs px-2 py-1.5" onClick={handleMatchWorks} disabled={loading}>
-                                            {loading ? "Matching..." : "Auto-Suggest (LLM)"}
-                                        </Button>
-                                    </div>
+                                            {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).length === 0 && (
+                                                <tr><td colSpan={3} className="p-8 text-center text-gray-400">No scenarios generated. Click "Generate Scenarios" above.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
 
-                                    {/* Works List */}
-                                    <div className="flex-1 overflow-auto p-3">
-                                        <div className="space-y-2">
-                                            {activeScenario.works.map((sw, idx) => {
-                                                const w = works.find(k => k.id === sw.workId);
-                                                return (
-                                                    <div key={sw.workId} className="flex items-center gap-2 p-2 border rounded bg-gray-50">
-                                                        <input 
-                                                            type="checkbox" 
-                                                            checked={sw.active} 
-                                                            onChange={() => {
-                                                                setScenarios(prev => prev.map(s => {
-                                                                    if(s.id === activeScenario.id) {
-                                                                        const newWorks = [...s.works];
-                                                                        newWorks[idx] = {...newWorks[idx], active: !newWorks[idx].active};
-                                                                        return {...s, works: newWorks};
-                                                                    }
-                                                                    return s;
-                                                                }))
-                                                            }}
-                                                            className="h-4 w-4 text-blue-600 rounded"
-                                                        />
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="text-sm font-medium truncate" title={w?.name}>{w?.name || "Unknown Work"}</div>
-                                                            <div className="text-xs text-gray-500">${w?.price} / {w?.unit}</div>
-                                                        </div>
-                                                        <div className="flex items-center gap-1">
+                            {/* Scenario Works Detail & Editing */}
+                            <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col">
+                                {activeScenario ? (
+                                    <>
+                                        <div className="p-3 border-b bg-gray-50 space-y-3">
+                                            {/* Editable Header */}
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Scenario Name</label>
+                                                <Input 
+                                                    value={activeScenario.name} 
+                                                    onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, name: e.target.value} : s))}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Description</label>
+                                                <textarea 
+                                                    className="w-full bg-white text-gray-900 border border-gray-300 rounded px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[60px]" 
+                                                    rows={2} 
+                                                    value={activeScenario.description} 
+                                                    onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, description: e.target.value} : s))}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* Add Work Bar */}
+                                        <div className="p-2 border-b bg-gray-100 flex gap-2 items-center">
+                                            <select 
+                                                className="flex-1 bg-white text-gray-900 border border-gray-300 rounded px-2 py-2 text-xs focus:outline-none focus:border-blue-500"
+                                                value={workToAddId}
+                                                onChange={(e) => setWorkToAddId(e.target.value)}
+                                            >
+                                                <option value="">-- Select work to add manually --</option>
+                                                {availableWorksForScenario.map(w => (
+                                                    <option key={w.id} value={w.id}>{w.name} (${w.price}/{w.unit})</option>
+                                                ))}
+                                            </select>
+                                            <Button onClick={handleAddManualWork} disabled={!workToAddId} className="py-1.5">Add</Button>
+                                            <div className="w-px h-6 bg-gray-300 mx-1"></div>
+                                            <Button variant="secondary" className="text-xs px-2 py-1.5" onClick={handleMatchWorks} disabled={loading}>
+                                                {loading ? "Matching..." : "Auto-Suggest (LLM)"}
+                                            </Button>
+                                        </div>
+
+                                        {/* Works List */}
+                                        <div className="flex-1 overflow-auto p-3">
+                                            <div className="space-y-2">
+                                                {activeScenario.works.map((sw, idx) => {
+                                                    const w = works.find(k => k.id === sw.workId);
+                                                    return (
+                                                        <div key={sw.workId} className="flex items-center gap-2 p-2 border rounded bg-gray-50">
                                                             <input 
-                                                                type="number" 
-                                                                className="w-16 text-right bg-white text-gray-900 border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500"
-                                                                value={sw.quantity}
-                                                                onChange={(e) => {
-                                                                    const val = parseFloat(e.target.value);
+                                                                type="checkbox" 
+                                                                checked={sw.active} 
+                                                                onChange={() => {
                                                                     setScenarios(prev => prev.map(s => {
                                                                         if(s.id === activeScenario.id) {
                                                                             const newWorks = [...s.works];
-                                                                            newWorks[idx] = {...newWorks[idx], quantity: val};
+                                                                            newWorks[idx] = {...newWorks[idx], active: !newWorks[idx].active};
                                                                             return {...s, works: newWorks};
                                                                         }
                                                                         return s;
                                                                     }))
                                                                 }}
+                                                                className="h-4 w-4 text-blue-600 rounded"
                                                             />
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-sm font-medium truncate" title={w?.name}>{w?.name || "Unknown Work"}</div>
+                                                                <div className="text-xs text-gray-500">${w?.price} / {w?.unit}</div>
+                                                            </div>
+                                                            <div className="flex items-center gap-1">
+                                                                <input 
+                                                                    type="number" 
+                                                                    className="w-16 text-right bg-white text-gray-900 border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500"
+                                                                    value={sw.quantity}
+                                                                    onChange={(e) => {
+                                                                        const val = parseFloat(e.target.value);
+                                                                        setScenarios(prev => prev.map(s => {
+                                                                            if(s.id === activeScenario.id) {
+                                                                                const newWorks = [...s.works];
+                                                                                newWorks[idx] = {...newWorks[idx], quantity: val};
+                                                                                return {...s, works: newWorks};
+                                                                            }
+                                                                            return s;
+                                                                        }))
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                            <div className="w-16 text-right text-sm font-mono">
+                                                                ${((w?.price || 0) * sw.quantity).toFixed(0)}
+                                                            </div>
+                                                            <button 
+                                                                onClick={() => handleRemoveWorkFromScenario(sw.workId)}
+                                                                className="text-gray-400 hover:text-red-500 p-1"
+                                                                title="Remove work"
+                                                            >
+                                                                ✕
+                                                            </button>
                                                         </div>
-                                                        <div className="w-16 text-right text-sm font-mono">
-                                                            ${((w?.price || 0) * sw.quantity).toFixed(0)}
-                                                        </div>
-                                                        <button 
-                                                            onClick={() => handleRemoveWorkFromScenario(sw.workId)}
-                                                            className="text-gray-400 hover:text-red-500 p-1"
-                                                            title="Remove work"
-                                                        >
-                                                            ✕
-                                                        </button>
+                                                    )
+                                                })}
+                                                {activeScenario.works.length === 0 && (
+                                                    <div className="text-center text-gray-400 mt-10 p-4 border-2 border-dashed rounded">
+                                                        <p>No works added yet.</p>
+                                                        <p className="text-xs mt-2">Use the dropdown above to add works manually or click "Auto-Suggest" to let AI find suitable works.</p>
                                                     </div>
-                                                )
-                                            })}
-                                            {activeScenario.works.length === 0 && (
-                                                <div className="text-center text-gray-400 mt-10 p-4 border-2 border-dashed rounded">
-                                                    <p>No works added yet.</p>
-                                                    <p className="text-xs mt-2">Use the dropdown above to add works manually or click "Auto-Suggest" to let AI find suitable works.</p>
-                                                </div>
-                                            )}
+                                                )}
+                                            </div>
                                         </div>
+                                    </>
+                                ) : (
+                                    <div className="flex-1 flex items-center justify-center text-gray-400 bg-gray-50">
+                                        <p>Select a scenario to view and edit details</p>
                                     </div>
-                                 </>
-                             ) : (
-                                <div className="flex-1 flex items-center justify-center text-gray-400 bg-gray-50">
-                                    <p>Select a scenario to view and edit details</p>
-                                </div>
-                             )}
+                                )}
+                            </div>
                         </div>
-                     </div>
+                     </>
                  )}
              </div>
         )}
@@ -968,7 +1057,7 @@ export default function App() {
                                 </div>
                                 <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm">
                                     <div className="w-2 h-2 rounded-full bg-blue-500"/>
-                                    LocalStorage Active
+                                    LocalStorage Active (Works: {works.length}, Scenarios: {scenarios.length})
                                 </div>
                             </div>
                         </div>
