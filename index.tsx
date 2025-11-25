@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 
@@ -7,9 +7,10 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 interface Discipline {
   id: string;
   code: string;
-  name: string;
   rank: number; // 1 (Hardest) to 6 (Easiest)
-  description: string;
+  nameKey: string;
+  descKey: string;
+  keywordsKey: string;
 }
 
 interface WorkItem {
@@ -49,6 +50,7 @@ interface LogEntry {
 interface AppSettings {
   apiKey: string;
   model: string;
+  language: "en" | "ru";
 }
 
 interface LoadingState {
@@ -56,22 +58,233 @@ interface LoadingState {
     progress: number;
 }
 
-// --- Constants & Initial Data ---
+// --- Constants & Translations ---
+
+const TRANSLATIONS = {
+  en: {
+    appTitle: "Collision Cost MVP",
+    tabs: { collision: "Collision", cost: "Cost", settings: "Settings", logs: "Logs" },
+    collisionControls: "Collision Matrix Controls",
+    placeholderUrl: "Pricing Source URL (e.g. ferrum-price.com)...",
+    btnLoad: "Load Works",
+    btnLoading: "Loading",
+    minScope: "Min Scope",
+    btnAutoAccept: "Auto Accept",
+    selected: "Selected",
+    btnGenerate: "Generate Scenarios (LLM)",
+    btnThinking: "Thinking",
+    rankMatrix: "Rank Matrix",
+    toggleDrawer: "Click row header to toggle drawer",
+    costMatrix: "Cost Matrix",
+    toggleDetail: "Click cell to toggle detail panel",
+    worksPanel: "Works",
+    showPanel: "Show Panel",
+    hide: "Hide",
+    table: {
+      name: "Name",
+      price: "Price",
+      unit: "Unit",
+      source: "Source",
+      score: "Score",
+      status: "Status",
+      action: "Action",
+      totalCost: "Total Cost"
+    },
+    noWorks: "No works loaded. Enter URL and click Load.",
+    scenarios: "Scenarios",
+    noScenarios: "No scenarios generated. Click \"Generate Scenarios\" above.",
+    scenarioName: "Scenario Name",
+    description: "Description",
+    addManual: "-- Select work to add manually --",
+    btnAdd: "Add",
+    btnAutoSuggest: "Auto-Suggest (LLM)",
+    btnMatching: "Matching...",
+    noWorksAdded: "No works added yet.",
+    noWorksAddedHint: "Use the dropdown above to add works manually or click \"Auto-Suggest\" to let AI find suitable works.",
+    selectScenario: "Select a scenario to view and edit details",
+    settingsTitle: "Settings",
+    apiKeyLabel: "API Key",
+    apiKeyHint: "Stored in app state (reset on refresh).",
+    modelLabel: "Model",
+    languageLabel: "Language",
+    dataMgmt: "Data Management (Persistence)",
+    dataMgmtHint: "Data is automatically saved to your browser's LocalStorage. To save to a file (e.g., for GitHub repo sync), export the database as JSON.",
+    btnExport: "Download DB (.json)",
+    btnImport: "Import DB (.json)",
+    systemStatus: "System Status",
+    apiConfigured: "API Configured",
+    storageActive: "LocalStorage Active",
+    logsTitle: "Request Logs",
+    totalTokens: "Total Tokens",
+    noLogs: "No logs yet.",
+    steps: {
+        parsing: "Parsing Page...",
+        classifying: "Classifying...",
+        analyzing: "Analyzing Collision...",
+        finalizing: "Finalizing...",
+        generating: "Generating Scenarios..."
+    },
+    disciplines: {
+        AR_WALLS_NAME: "Walls", AR_WALLS_DESC: "Architectural walls, partitions",
+        AR_WALLS_KW: "brick, block, drywall, plaster, paint, dismantling, partition",
+        
+        AR_DOORS_NAME: "Doors / Windows", AR_DOORS_DESC: "Door and window openings",
+        AR_DOORS_KW: "door, window, jam, installation, dismantling, opening",
+
+        KR_WALLS_NAME: "Walls", KR_WALLS_DESC: "Load-bearing walls (Monolith)",
+        KR_WALLS_KW: "concrete, monolith, reinforcement, drilling, diamond cutting, opening, hole",
+
+        KR_COLS_NAME: "Columns / Pylons", KR_COLS_DESC: "Load-bearing columns",
+        KR_COLS_KW: "concrete, monolith, column, pylon, drilling, diamond cutting, reinforcement, hole",
+
+        KR_SLABS_NAME: "Slabs / Ramps", KR_SLABS_DESC: "Floor slabs",
+        KR_SLABS_KW: "concrete, slab, floor, ceiling, drilling, cutting, opening",
+
+        KR_BEAMS_NAME: "Beams", KR_BEAMS_DESC: "Load-bearing beams",
+        KR_BEAMS_KW: "concrete, beam, drilling, cutting, reinforcement",
+
+        VK_K_NAME: "Pipes / Drainage", VK_K_DESC: "Sewage and storm drainage",
+        VK_K_KW: "pipe, drainage, sewage, plastic, installation, dismantling",
+
+        VK_V_NAME: "Pipes", VK_V_DESC: "Water supply (Pressure)",
+        VK_V_KW: "pipe, water supply, steel, polypropylene, installation, valve",
+
+        OV_VENT_NAME: "Ducts", OV_VENT_DESC: "Ventilation ducts",
+        OV_VENT_KW: "duct, ventilation, tin, installation, dismantling, diffusers",
+
+        OV_HEAT_NAME: "Pipes", OV_HEAT_DESC: "Heating pipes",
+        OV_HEAT_KW: "radiator, pipe, heating, welding, installation",
+
+        AUPT_PIPE_NAME: "Pipes", AUPT_PIPE_DESC: "Fire extinguishing pipes",
+        AUPT_PIPE_KW: "pipe, fire, steel, welding, painting",
+
+        AUPT_SPR_NAME: "Sprinklers", AUPT_SPR_DESC: "Sprinkler heads",
+        AUPT_SPR_KW: "sprinkler, head, fire",
+
+        EOM_NAME: "Trays / Cables", EOM_DESC: "Cable trays, low voltage",
+        EOM_KW: "tray, cable, wire, socket, switch, installation"
+    }
+  },
+  ru: {
+    appTitle: "Collision Cost MVP",
+    tabs: { collision: "Коллизии", cost: "Стоимость", settings: "Настройки", logs: "Логи" },
+    collisionControls: "Управление матрицей коллизий",
+    placeholderUrl: "URL источника цен (например, ferrum-price.com)...",
+    btnLoad: "Загрузить работы",
+    btnLoading: "Загрузка",
+    minScope: "Мин. порог",
+    btnAutoAccept: "Авто-принятие",
+    selected: "Выбрано",
+    btnGenerate: "Сгенерировать сценарии (LLM)",
+    btnThinking: "Думаю",
+    rankMatrix: "Матрица Рангов",
+    toggleDrawer: "Нажмите на заголовок строки, чтобы открыть панель",
+    costMatrix: "Матрица Стоимости",
+    toggleDetail: "Нажмите на ячейку, чтобы открыть детали",
+    worksPanel: "Работы",
+    showPanel: "Показать панель",
+    hide: "Скрыть",
+    table: {
+      name: "Наименование",
+      price: "Цена",
+      unit: "Ед.изм.",
+      source: "Источник",
+      score: "Оценка",
+      status: "Статус",
+      action: "Действие",
+      totalCost: "Общая стоимость"
+    },
+    noWorks: "Работы не загружены. Введите URL и нажмите Загрузить.",
+    scenarios: "Сценарии",
+    noScenarios: "Сценарии не сгенерированы. Нажмите \"Сгенерировать сценарии\" выше.",
+    scenarioName: "Название сценария",
+    description: "Описание",
+    addManual: "-- Выберите работу для добавления вручную --",
+    btnAdd: "Добавить",
+    btnAutoSuggest: "Авто-подбор (LLM)",
+    btnMatching: "Подбор...",
+    noWorksAdded: "Работы еще не добавлены.",
+    noWorksAddedHint: "Используйте выпадающий список выше для ручного добавления или нажмите \"Авто-подбор\".",
+    selectScenario: "Выберите сценарий для просмотра и редактирования",
+    settingsTitle: "Настройки",
+    apiKeyLabel: "API Ключ",
+    apiKeyHint: "Хранится в состоянии приложения (сбрасывается при обновлении).",
+    modelLabel: "Модель",
+    languageLabel: "Язык",
+    dataMgmt: "Управление данными",
+    dataMgmtHint: "Данные автоматически сохраняются в LocalStorage браузера. Для сохранения в файл (например, для Git) экспортируйте БД в JSON.",
+    btnExport: "Скачать БД (.json)",
+    btnImport: "Импортировать БД (.json)",
+    systemStatus: "Статус системы",
+    apiConfigured: "API Настроен",
+    storageActive: "LocalStorage Активен",
+    logsTitle: "Логи запросов",
+    totalTokens: "Всего токенов",
+    noLogs: "Логов пока нет.",
+    steps: {
+        parsing: "Парсинг страницы...",
+        classifying: "Классификация...",
+        analyzing: "Анализ коллизии...",
+        finalizing: "Завершение...",
+        generating: "Генерация сценариев..."
+    },
+    disciplines: {
+        AR_WALLS_NAME: "Стены", AR_WALLS_DESC: "Архитектурные стены, перегородки",
+        AR_WALLS_KW: "кирпич, блок, гипсокартон, штукатурка, покраска, демонтаж, перегородка",
+
+        AR_DOORS_NAME: "Двери / Окна", AR_DOORS_DESC: "Дверные и оконные проемы",
+        AR_DOORS_KW: "дверь, окно, косяк, монтаж, демонтаж, проем",
+
+        KR_WALLS_NAME: "Стены", KR_WALLS_DESC: "Несущие стены (Монолит)",
+        KR_WALLS_KW: "бетон, монолит, арматура, бурение, алмазная резка, проем, отверстие",
+
+        KR_COLS_NAME: "Колонны / Пилоны", KR_COLS_DESC: "Несущие колонны и пилоны",
+        KR_COLS_KW: "бетон, монолит, колонна, пилон, бурение, алмазная резка, арматура, отверстие, восстановление",
+
+        KR_SLABS_NAME: "Перекрытия / Покрытия / Рампы", KR_SLABS_DESC: "Плиты перекрытия",
+        KR_SLABS_KW: "бетон, перекрытие, плита, бурение, резка, отверстие, монолит",
+
+        KR_BEAMS_NAME: "Балки", KR_BEAMS_DESC: "Несущие балки",
+        KR_BEAMS_KW: "бетон, балка, ригель, бурение, резка, арматура",
+
+        VK_K_NAME: "Трубы / Дренаж", VK_K_DESC: "Бытовая и ливневая канализация",
+        VK_K_KW: "труба, канализация, дренаж, пластик, монтаж, демонтаж",
+
+        VK_V_NAME: "Трубы", VK_V_DESC: "Водоснабжение (напорное)",
+        VK_V_KW: "труба, водоснабжение, сталь, полипропилен, монтаж, кран",
+
+        OV_VENT_NAME: "Воздуховод", OV_VENT_DESC: "Вентиляционные короба",
+        OV_VENT_KW: "воздуховод, вентиляция, жесть, монтаж, демонтаж, диффузор",
+
+        OV_HEAT_NAME: "Трубы", OV_HEAT_DESC: "Трубы отопления",
+        OV_HEAT_KW: "радиатор, труба, отопление, сварка, монтаж",
+
+        AUPT_PIPE_NAME: "Трубы", AUPT_PIPE_DESC: "Трубопроводы пожаротушения",
+        AUPT_PIPE_KW: "труба, пожаротушение, сталь, сварка, покраска",
+
+        AUPT_SPR_NAME: "Спринклеры", AUPT_SPR_DESC: "Спринклерные оросители",
+        AUPT_SPR_KW: "спринклер, ороситель, пожаротушение",
+
+        EOM_NAME: "Кабельканалы / Лотки", EOM_DESC: "Лотки, кабели, слаботочка",
+        EOM_KW: "лоток, кабель, провод, розетка, выключатель, монтаж"
+    }
+  }
+};
 
 const DISCIPLINES: Discipline[] = [
-  { id: "AR_WALLS", code: "АР", name: "Стены", rank: 2, description: "Архитектурные стены, перегородки" },
-  { id: "AR_DOORS", code: "АР", name: "Двери / Окна", rank: 2, description: "Дверные и оконные проемы" },
-  { id: "KR_WALLS", code: "КР", name: "Стены", rank: 1, description: "Несущие стены (Монолит)" },
-  { id: "KR_COLS", code: "КР", name: "Колонны / Пилоны", rank: 1, description: "Несущие колонны и пилоны" },
-  { id: "KR_SLABS", code: "КР", name: "Перекрытия / Покрытия / Рампы", rank: 1, description: "Плиты перекрытия" },
-  { id: "KR_BEAMS", code: "КР", name: "Балки", rank: 1, description: "Несущие балки" },
-  { id: "VK_K", code: "ВК (К)", name: "Трубы / Дренаж", rank: 3, description: "Бытовая и ливневая канализация" },
-  { id: "VK_V", code: "ВК (В)", name: "Трубы", rank: 5, description: "Водоснабжение (напорное)" },
-  { id: "OV_VENT", code: "ОВ (Вент.)", name: "Воздуховод", rank: 4, description: "Вентиляционные короба" },
-  { id: "OV_HEAT", code: "ОВ (Отоп.)", name: "Трубы", rank: 5, description: "Трубы отопления" },
-  { id: "AUPT_PIPE", code: "АУПТ", name: "Трубы", rank: 5, description: "Трубопроводы пожаротушения" },
-  { id: "AUPT_SPR", code: "АУПТ", name: "Спринклеры", rank: 5, description: "Спринклерные оросители" },
-  { id: "EOM", code: "ЭО, ЭС, ЭМ, СС", name: "Кабельканалы / Лотки", rank: 6, description: "Лотки, кабели, слаботочка" },
+  { id: "AR_WALLS", code: "АР", rank: 2, nameKey: "AR_WALLS_NAME", descKey: "AR_WALLS_DESC", keywordsKey: "AR_WALLS_KW" },
+  { id: "AR_DOORS", code: "АР", rank: 2, nameKey: "AR_DOORS_NAME", descKey: "AR_DOORS_DESC", keywordsKey: "AR_DOORS_KW" },
+  { id: "KR_WALLS", code: "КР", rank: 1, nameKey: "KR_WALLS_NAME", descKey: "KR_WALLS_DESC", keywordsKey: "KR_WALLS_KW" },
+  { id: "KR_COLS", code: "КР", rank: 1, nameKey: "KR_COLS_NAME", descKey: "KR_COLS_DESC", keywordsKey: "KR_COLS_KW" },
+  { id: "KR_SLABS", code: "КР", rank: 1, nameKey: "KR_SLABS_NAME", descKey: "KR_SLABS_DESC", keywordsKey: "KR_SLABS_KW" },
+  { id: "KR_BEAMS", code: "КР", rank: 1, nameKey: "KR_BEAMS_NAME", descKey: "KR_BEAMS_DESC", keywordsKey: "KR_BEAMS_KW" },
+  { id: "VK_K", code: "ВК (К)", rank: 3, nameKey: "VK_K_NAME", descKey: "VK_K_DESC", keywordsKey: "VK_K_KW" },
+  { id: "VK_V", code: "ВК (В)", rank: 5, nameKey: "VK_V_NAME", descKey: "VK_V_DESC", keywordsKey: "VK_V_KW" },
+  { id: "OV_VENT", code: "ОВ (Вент.)", rank: 4, nameKey: "OV_VENT_NAME", descKey: "OV_VENT_DESC", keywordsKey: "OV_VENT_KW" },
+  { id: "OV_HEAT", code: "ОВ (Отоп.)", rank: 5, nameKey: "OV_HEAT_NAME", descKey: "OV_HEAT_DESC", keywordsKey: "OV_HEAT_KW" },
+  { id: "AUPT_PIPE", code: "АУПТ", rank: 5, nameKey: "AUPT_PIPE_NAME", descKey: "AUPT_PIPE_DESC", keywordsKey: "AUPT_PIPE_KW" },
+  { id: "AUPT_SPR", code: "АУПТ", rank: 5, nameKey: "AUPT_SPR_NAME", descKey: "AUPT_SPR_DESC", keywordsKey: "AUPT_SPR_KW" },
+  { id: "EOM", code: "ЭО, ЭС, ЭМ, СС", rank: 6, nameKey: "EOM_NAME", descKey: "EOM_DESC", keywordsKey: "EOM_KW" },
 ];
 
 // --- Helpers ---
@@ -80,17 +293,61 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 
 const cleanJson = (text: string | undefined) => {
   if (!text) return "{}";
-  return text.replace(/```json/g, '').replace(/```/g, '').trim();
+  // Remove markdown code blocks and whitespace
+  let cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  
+  // Robustly find start of JSON
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  
+  let start = 0;
+  if (firstBrace === -1 && firstBracket === -1) {
+      // No JSON found
+      return "{}";
+  } else if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      start = firstBrace;
+  } else {
+      start = firstBracket;
+  }
+  
+  return cleaned.substring(start);
+};
+
+const safeParseJSON = (text: string) => {
+  const cleaned = cleanJson(text);
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    // Attempt to recover truncated JSON by finding the last closing bracket/brace
+    // This often happens if maxOutputTokens cuts off the response
+    try {
+        if (cleaned.startsWith('[')) {
+            // Attempt to close array
+             const lastCloseObj = cleaned.lastIndexOf('}');
+             if (lastCloseObj > 0) {
+                 const salvaged = cleaned.substring(0, lastCloseObj + 1) + ']';
+                 return JSON.parse(salvaged);
+             }
+        } else if (cleaned.startsWith('{')) {
+            // Attempt to close object
+            // ... (implement if needed for specific structures)
+        }
+    } catch (e2) {
+        // Recovery failed
+    }
+    
+    console.warn("JSON Parse Failed (Cleaned):", cleaned.substring(0, 100) + "...");
+    // Return null instead of throwing to prevent app crash
+    return null;
+  }
 };
 
 const getDisciplineStyle = (d: Discipline) => {
   // Override for VK and OV to have unified, distinct colors
   if (d.code.startsWith("ВК")) {
-    // Vibrant Blue for Water/Sewerage
     return { bg: "#0284c7", text: "#ffffff" }; 
   }
   if (d.code.startsWith("ОВ")) {
-    // Vibrant Orange for HVAC
     return { bg: "#ea580c", text: "#ffffff" }; 
   }
 
@@ -119,18 +376,25 @@ class LLMService {
     }
   }
 
-  async parseWorks(url: string, disciplines: Discipline[]): Promise<{ works: any[], tokens: number }> {
+  async parseWorks(url: string, disciplines: {code: string, name: string, description: string}[], lang: 'en' | 'ru'): Promise<{ works: any[], tokens: number }> {
     if (!this.ai) throw new Error("API Key not configured");
-
-    // Simulation of parsing: We ask the LLM to hallucinate/retrieve typical works for a construction site 
-    // based on the URL hint (since we can't fetch cross-origin in browser easily without a proxy).
+    
+    const langPrompt = lang === 'ru' ? "Output ONLY in Russian language." : "Output ONLY in English language.";
+    
     const prompt = `
       Act as a construction cost estimator. 
       Target URL context: ${url}
       
-      Generate a list of 10-15 construction work items that might be found on a pricing page like this.
+      Generate a list of exactly 20 construction work items that might be found on a pricing page like this.
       Focus on repair, cutting, drilling, dismantling, and installation works relevant to these disciplines:
       ${disciplines.map(d => `${d.code} - ${d.name} (${d.description})`).join(", ")}.
+      
+      IMPORTANT RULES:
+      1. Do NOT include the full HTML of the page.
+      2. Keep "name" concise (under 10 words).
+      3. Return ONLY valid JSON.
+      
+      ${langPrompt}
       
       Return JSON:
       {
@@ -145,6 +409,7 @@ class LLMService {
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        maxOutputTokens: 8000, // Increased limit for Flash models
         responseSchema: {
             type: Type.OBJECT,
             properties: {
@@ -165,23 +430,30 @@ class LLMService {
       }
     });
 
-    const result = JSON.parse(cleanJson(response.text));
+    const result = safeParseJSON(response.text);
     return { 
-      works: result.items || [], 
+      works: result?.items || [], 
       tokens: response.usageMetadata?.totalTokenCount || 0 
     };
   }
 
-  async classifyWorks(works: any[], categoryId: string, disciplineDesc: string): Promise<{ classified: any[], tokens: number }> {
+  async classifyWorks(works: any[], categoryId: string, disciplineDesc: string, keywords: string): Promise<{ classified: any[], tokens: number }> {
     if (!this.ai) throw new Error("API Key not configured");
 
     const prompt = `
-      You are an expert construction engineer.
+      You are an expert construction engineer specializing in BIM and collision resolution.
+      
+      Task: Evaluate relevance of construction works for resolving collisions in the Target Category.
+      
       Target Category: ${categoryId}
       Category Description: ${disciplineDesc}
+      Key Related Terms: ${keywords}
       
-      Analyze the following works and determine if they belong to the Target Category for resolving collisions.
-      Assign a confidence score (0.0 to 1.0).
+      Scoring Rules:
+      1. High Score (0.8 - 1.0): Work explicitly mentions materials or methods specific to this category (e.g. "Concrete drilling" for Monolith/KR, "Pipe cutting" for Pipes). 
+         Note: For KR (Constructive), works involving "Concrete", "Diamond Drilling", "Cutting openings" are Critical and should be scored HIGH.
+      2. Medium Score (0.5 - 0.7): General construction works plausible for this category.
+      3. Low Score (0.0 - 0.2): Unrelated works (e.g. Painting for Pipes, Flooring for Ceiling).
       
       Works Input: ${JSON.stringify(works.map(w => w.name))}
       
@@ -193,6 +465,7 @@ class LLMService {
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        maxOutputTokens: 4000,
         responseSchema: {
              type: Type.ARRAY,
              items: {
@@ -206,12 +479,17 @@ class LLMService {
       }
     });
 
-    const result = JSON.parse(cleanJson(response.text));
-    return { classified: result, tokens: response.usageMetadata?.totalTokenCount || 0 };
+    const result = safeParseJSON(response.text);
+    // Ensure we always return an array, even if parsing failed (null) or structure was wrong
+    const validResult = Array.isArray(result) ? result : [];
+    
+    return { classified: validResult, tokens: response.usageMetadata?.totalTokenCount || 0 };
   }
 
-  async generateScenarios(rowDisc: Discipline, colDisc: Discipline): Promise<{ scenarios: any[], tokens: number }> {
+  async generateScenarios(rowDisc: {code: string, name: string}, colDisc: {code: string, name: string}, lang: 'en' | 'ru'): Promise<{ scenarios: any[], tokens: number }> {
     if (!this.ai) throw new Error("API Key not configured");
+
+    const langPrompt = lang === 'ru' ? "Output strictly in Russian language." : "Output strictly in English language.";
 
     const prompt = `
       Role: Senior Construction Engineer.
@@ -220,11 +498,17 @@ class LLMService {
       
       Output 3 distinct, realistic scenarios to resolve this collision.
       
-      JSON Structure Guidelines:
-      1. name: A SHORT title (3-5 words max). Do NOT include explanation here. Example: "Shift Wall Position", "Create Opening in Wall".
-      2. description: A DETAILED technical explanation (2-3 sentences). Explain what work is done and why.
+      Requirements:
+      1. 'name': A very short title (max 5-6 words) summarizing the method.
+      2. 'description': A detailed technical explanation of the work required, why it's chosen, and its complexity.
+      
+      ${langPrompt}
 
-      Return strictly a JSON Array.
+      Return JSON:
+      [
+        { "name": "Local Shift", "description": "Move the element slightly..." },
+        { "name": "Re-routing", "description": "Completely change route..." }
+      ]
     `;
 
     const response = await this.ai.models.generateContent({
@@ -232,20 +516,22 @@ class LLMService {
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        maxOutputTokens: 2000,
         responseSchema: {
             type: Type.ARRAY,
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    name: { type: Type.STRING, description: "Short title of the scenario (3-5 words)" },
+                    name: { type: Type.STRING, description: "Short title (5-6 words max)" },
                     description: { type: Type.STRING, description: "Detailed technical explanation" }
                 }
             }
         }
       }
     });
-
-    return { scenarios: JSON.parse(cleanJson(response.text)), tokens: response.usageMetadata?.totalTokenCount || 0 };
+    
+    const result = safeParseJSON(response.text);
+    return { scenarios: Array.isArray(result) ? result : [], tokens: response.usageMetadata?.totalTokenCount || 0 };
   }
 
   async matchWorksToScenario(scenario: any, availableWorks: WorkItem[]): Promise<{ matches: any[], tokens: number }> {
@@ -272,6 +558,7 @@ class LLMService {
         contents: prompt,
         config: {
             responseMimeType: "application/json",
+            maxOutputTokens: 2000,
             responseSchema: {
                 type: Type.ARRAY,
                 items: {
@@ -285,11 +572,73 @@ class LLMService {
         }
     });
     
-    return { matches: JSON.parse(cleanJson(response.text)), tokens: response.usageMetadata?.totalTokenCount || 0 };
+    const result = safeParseJSON(response.text);
+    return { matches: Array.isArray(result) ? result : [], tokens: response.usageMetadata?.totalTokenCount || 0 };
   }
 }
 
 const llmService = new LLMService();
+
+// --- Hooks ---
+
+const useProgressSimulator = () => {
+  const intervalsRef = useRef<Record<string, NodeJS.Timeout>>({});
+
+  const startProgress = useCallback((id: string, setState: React.Dispatch<React.SetStateAction<Record<string, LoadingState>>>, initialStep: string) => {
+    // Set initial
+    setState(prev => ({ ...prev, [id]: { step: initialStep, progress: 5 } }));
+    
+    // Clear existing if any
+    if (intervalsRef.current[id]) clearInterval(intervalsRef.current[id]);
+
+    // Start interval
+    intervalsRef.current[id] = setInterval(() => {
+        setState(prev => {
+            const current = prev[id];
+            if (!current) return prev;
+            // Increment until 90%
+            const nextProgress = current.progress >= 90 ? 90 : current.progress + (Math.random() * 3);
+            return {
+                ...prev,
+                [id]: { ...current, progress: nextProgress }
+            };
+        });
+    }, 400); // Update every 400ms
+  }, []);
+
+  const updateStep = useCallback((id: string, setState: React.Dispatch<React.SetStateAction<Record<string, LoadingState>>>, step: string, forceProgress?: number) => {
+    setState(prev => {
+        const current = prev[id];
+        if (!current) return prev;
+        return {
+            ...prev,
+            [id]: { step, progress: forceProgress !== undefined ? forceProgress : current.progress }
+        };
+    });
+  }, []);
+
+  const stopProgress = useCallback((id: string, setState: React.Dispatch<React.SetStateAction<Record<string, LoadingState>>>) => {
+    if (intervalsRef.current[id]) {
+        clearInterval(intervalsRef.current[id]);
+        delete intervalsRef.current[id];
+    }
+    // Remove from state
+    setState(prev => {
+        const newState = { ...prev };
+        delete newState[id];
+        return newState;
+    });
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+      return () => {
+          Object.values(intervalsRef.current).forEach(clearInterval);
+      };
+  }, []);
+
+  return { startProgress, updateStep, stopProgress };
+};
 
 // --- Components ---
 
@@ -340,7 +689,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"collision" | "cost" | "settings" | "logs">("collision");
   
   // "Database"
-  const [settings, setSettings] = useState<AppSettings>({ apiKey: process.env.API_KEY || "", model: "gemini-2.5-flash" });
+  const [settings, setSettings] = useState<AppSettings>({ apiKey: process.env.API_KEY || "", model: "gemini-2.5-flash", language: "en" });
   
   // Initialize from LocalStorage
   const [works, setWorks] = useState<WorkItem[]>(() => {
@@ -373,6 +722,27 @@ export default function App() {
   const [loadingRows, setLoadingRows] = useState<Record<string, LoadingState>>({});
   const [loadingCells, setLoadingCells] = useState<Record<string, LoadingState>>({});
   const [generalLoading, setGeneralLoading] = useState(false); // Fallback
+  
+  // Hooks
+  const { startProgress, updateStep, stopProgress } = useProgressSimulator();
+
+  // Translation Helper
+  const t = useCallback((key: string) => {
+      const lang = settings.language || 'en';
+      const dict: any = TRANSLATIONS[lang];
+      // Simple dot notation access support
+      return key.split('.').reduce((o, i) => o?.[i], dict) || key;
+  }, [settings.language]);
+
+  // Translated Disciplines
+  const localizedDisciplines = useMemo(() => {
+      return DISCIPLINES.map(d => ({
+          ...d,
+          name: t(`disciplines.${d.nameKey}`),
+          description: t(`disciplines.${d.descKey}`),
+          keywords: t(`disciplines.${d.keywordsKey}`)
+      }));
+  }, [settings.language, t]);
 
   // Init LLM
   useEffect(() => {
@@ -444,28 +814,55 @@ export default function App() {
     if (!urlInput || !targetRowId) return;
     if (loadingRows[targetRowId]) return;
 
-    setLoadingRows(prev => ({ ...prev, [targetRowId]: { step: 'Parsing Page...', progress: 10 } }));
+    startProgress(targetRowId, setLoadingRows, t('steps.parsing'));
     setPanelOpen(true);
+    let totalTokens = 0;
 
     try {
-      const { works: rawWorks, tokens: t1 } = await llmService.parseWorks(urlInput, DISCIPLINES);
+      // Step 1: Parse Works
+      const { works: rawWorks, tokens: t1 } = await llmService.parseWorks(
+          urlInput, 
+          localizedDisciplines.map(d => ({code: d.code, name: d.name, description: d.description})),
+          settings.language
+      );
+      totalTokens += t1;
       
-      setLoadingRows(prev => ({ ...prev, [targetRowId]: { step: 'Classifying...', progress: 50 } }));
+      if (!rawWorks || rawWorks.length === 0) {
+           throw new Error("No works parsed from URL/Context.");
+      }
 
-      const category = DISCIPLINES.find(d => d.id === targetRowId)!;
-      const { classified, tokens: t2 } = await llmService.classifyWorks(rawWorks, category.name, category.description);
+      updateStep(targetRowId, setLoadingRows, t('steps.classifying'));
 
-      setLoadingRows(prev => ({ ...prev, [targetRowId]: { step: 'Finalizing...', progress: 90 } }));
+      // Step 2: Classify Works (with error boundary)
+      let classified: any[] = [];
+      let t2 = 0;
+      
+      try {
+          const category = localizedDisciplines.find(d => d.id === targetRowId)!;
+          // Pass category keywords for better context
+          const clsResult = await llmService.classifyWorks(rawWorks, category.name, category.description, category.keywords);
+          classified = clsResult.classified;
+          t2 = clsResult.tokens;
+          totalTokens += t2;
+      } catch (clsError: any) {
+          console.warn("Classification failed, works will be loaded without scores.", clsError);
+          addLog("Classify Works", "error", `Classification failed: ${clsError.message}`);
+          // Proceed with empty classification -> scores will be 0
+      }
+
+      updateStep(targetRowId, setLoadingRows, t('steps.finalizing'));
 
       const newWorks: WorkItem[] = rawWorks.map((rw: any) => {
-        const cls = classified.find((c: any) => c.name === rw.name);
-        const score = cls ? cls.score : 0;
+        // Robust finding: handle case where classified is empty or missing items
+        const cls = Array.isArray(classified) ? classified.find((c: any) => c.name === rw.name) : null;
+        const score = cls && typeof cls.score === 'number' ? cls.score : 0;
+        
         return {
           id: generateId(),
           categoryId: targetRowId,
-          name: rw.name,
-          price: typeof rw.price === 'number' ? rw.price : 0, // Ensure number
-          unit: rw.unit,
+          name: rw.name || "Unknown Work",
+          price: typeof rw.price === 'number' ? rw.price : 0,
+          unit: rw.unit || "unit",
           source: urlInput,
           score: score,
           status: score >= minScope ? "accepted" : "pending"
@@ -473,15 +870,19 @@ export default function App() {
       });
 
       setWorks(prev => [...prev, ...newWorks]);
-      addLog("Load Works", "success", `Loaded ${newWorks.length} works for ${category.code}`, t1 + t2);
+      const category = localizedDisciplines.find(d => d.id === targetRowId)!;
+      addLog("Load Works", "success", `Loaded ${newWorks.length} works for ${category.code}`, totalTokens);
+
     } catch (e: any) {
-      addLog("Load Works", "error", e.message);
-    } finally {
+      addLog("Load Works", "error", e.message, totalTokens);
+      // Clean up state immediately on error
       setLoadingRows(prev => {
-        const newState = { ...prev };
-        delete newState[targetRowId];
-        return newState;
+         const newState = { ...prev };
+         delete newState[targetRowId];
+         return newState;
       });
+    } finally {
+      stopProgress(targetRowId, setLoadingRows);
     }
   };
 
@@ -504,17 +905,21 @@ export default function App() {
     // Prevent double submission
     if (loadingCells[cellKey]) return;
 
-    setLoadingCells(prev => ({ ...prev, [cellKey]: { step: 'Analyzing Collision...', progress: 20 } }));
+    startProgress(cellKey, setLoadingCells, t('steps.analyzing'));
     setPanelOpen(true);
     setGeneralLoading(true);
 
     try {
-      const rDisc = DISCIPLINES.find(d => d.id === selectedCell.r)!;
-      const cDisc = DISCIPLINES.find(d => d.id === selectedCell.c)!;
+      const rDisc = localizedDisciplines.find(d => d.id === selectedCell.r)!;
+      const cDisc = localizedDisciplines.find(d => d.id === selectedCell.c)!;
       
-      const { scenarios: genScenarios, tokens } = await llmService.generateScenarios(rDisc, cDisc);
+      const { scenarios: genScenarios, tokens } = await llmService.generateScenarios(
+          { code: rDisc.code, name: rDisc.name },
+          { code: cDisc.code, name: cDisc.name },
+          settings.language
+      );
       
-      setLoadingCells(prev => ({ ...prev, [cellKey]: { step: 'Finalizing...', progress: 80 } }));
+      updateStep(cellKey, setLoadingCells, t('steps.finalizing'));
 
       const newScenarios: Scenario[] = genScenarios.map((s: any) => ({
         id: generateId(),
@@ -528,13 +933,15 @@ export default function App() {
       addLog("Generate Scenarios", "success", `Generated ${newScenarios.length} scenarios for ${rDisc.code}/${cDisc.code}`, tokens);
     } catch (e: any) {
       addLog("Generate Scenarios", "error", e.message);
+      // Force cleanup
+      setLoadingCells(prev => {
+         const newState = { ...prev };
+         delete newState[cellKey];
+         return newState;
+      });
     } finally {
       setGeneralLoading(false);
-      setLoadingCells(prev => {
-        const newState = { ...prev };
-        delete newState[cellKey];
-        return newState;
-      });
+      stopProgress(cellKey, setLoadingCells);
     }
   };
 
@@ -545,7 +952,7 @@ export default function App() {
     const availableWorks = works.filter(w => w.categoryId === selectedCell.r);
 
     if (availableWorks.length === 0) {
-        const rowName = DISCIPLINES.find(d => d.id === selectedCell.r)?.name || selectedCell.r;
+        const rowName = localizedDisciplines.find(d => d.id === selectedCell.r)?.name || selectedCell.r;
         addLog("Match Works", "error", `No works found for category '${rowName}'. Please load works in Collision tab.`);
         return;
     }
@@ -636,12 +1043,13 @@ export default function App() {
     const cellScenarios = scenarios.filter(s => s.matrixKey === `${rId}:${cId}`);
     if (cellScenarios.length === 0) return null;
     const costs = cellScenarios.map(calculateScenarioCost);
-    // Optional: You could filter out 0 costs if they represent 'empty' scenarios, 
-    // but sometimes 0 is valid (e.g., 'Do nothing'). 
-    // Keeping all valid numbers.
-    
-    const min = Math.min(...costs);
-    const max = Math.max(...costs);
+    // Filter valid scenarios (>0) to avoid displaying 0-0 range if work is just not selected yet
+    const validCosts = costs.filter(c => c > 0);
+    if (validCosts.length === 0 && costs.length > 0) return { min: 0, max: 0, count: costs.length };
+    if (validCosts.length === 0) return null;
+
+    const min = Math.min(...validCosts);
+    const max = Math.max(...validCosts);
     return { min, max, count: cellScenarios.length };
   };
 
@@ -649,12 +1057,12 @@ export default function App() {
 
   const renderMatrix = (type: "collision" | "cost") => (
     <div className="overflow-auto flex-1 bg-white border rounded shadow-sm relative">
-      <div className="grid min-w-[1200px]" style={{ gridTemplateColumns: `200px repeat(${DISCIPLINES.length}, 1fr)` }}>
+      <div className="grid min-w-[1200px]" style={{ gridTemplateColumns: `200px repeat(${localizedDisciplines.length}, 1fr)` }}>
         {/* Header Row */}
         <div className="sticky top-0 left-0 z-30 bg-gray-100 p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm">
-          Category
+          {t('table.name')}
         </div>
-        {DISCIPLINES.map(d => {
+        {localizedDisciplines.map(d => {
             const style = getDisciplineStyle(d);
             return (
                 <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm" style={{ backgroundColor: style.bg }}>
@@ -665,7 +1073,7 @@ export default function App() {
         })}
 
         {/* Rows */}
-        {DISCIPLINES.map(r => {
+        {localizedDisciplines.map(r => {
           const style = getDisciplineStyle(r);
           const isRowLoading = loadingRows[r.id];
 
@@ -702,12 +1110,12 @@ export default function App() {
                
                {/* Show Loading Status Text if Selected */}
                {isRowLoading && selectedRowId === r.id && (
-                   <span className="text-[9px] text-blue-700 bg-white/80 rounded px-1 mt-1 relative z-10 w-fit">{isRowLoading.step}</span>
+                   <span className="text-[9px] text-blue-700 bg-white/80 rounded px-1 mt-1 relative z-10 w-fit">{isRowLoading.step} ({Math.round(isRowLoading.progress)}%)</span>
                )}
             </div>
 
             {/* Cells */}
-            {DISCIPLINES.map(c => {
+            {localizedDisciplines.map(c => {
               const isDiagonal = r.id === c.id;
               const cellKey = `${r.id}:${c.id}`;
               const isSelected = selectedCell?.r === r.id && selectedCell?.c === c.id;
@@ -795,7 +1203,7 @@ export default function App() {
       <div className="bg-white border-b border-[var(--border)] px-6 py-3 flex items-center justify-between shadow-sm z-20">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 text-white p-1.5 rounded font-bold font-mono">CMWC</div>
-          <h1 className="font-semibold text-lg text-gray-800">Collision Cost MVP</h1>
+          <h1 className="font-semibold text-lg text-gray-800">{t('appTitle')}</h1>
         </div>
         <div className="flex bg-gray-100 p-1 rounded-lg">
           {(["collision", "cost", "settings", "logs"] as const).map(tab => (
@@ -804,7 +1212,7 @@ export default function App() {
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
             >
-              {tab}
+              {t(`tabs.${tab}`)}
             </button>
           ))}
         </div>
@@ -813,10 +1221,10 @@ export default function App() {
       {/* Toolbar (Dynamic based on tab) */}
       {activeTab === "collision" && (
         <div className="bg-white border-b px-6 py-2 flex items-center gap-4 text-sm shadow-sm z-10">
-            <span className="font-medium text-gray-500 whitespace-nowrap">Collision Matrix Controls:</span>
+            <span className="font-medium text-gray-500 whitespace-nowrap">{t('collisionControls')}:</span>
             <div className="flex-1 flex gap-2">
                  <Input 
-                    placeholder="Pricing Source URL (e.g. ferrum-price.com)..." 
+                    placeholder={t('placeholderUrl')}
                     value={urlInput} 
                     onChange={(e:any) => setUrlInput(e.target.value)}
                     className="max-w-md"
@@ -825,11 +1233,11 @@ export default function App() {
                     onClick={handleLoadWorks} 
                     disabled={!selectedRowId || !!currentRowLoading}
                 >
-                    {currentRowLoading ? `Loading (${Math.round(currentRowLoading.progress)}%)...` : "Load Works"}
+                    {currentRowLoading ? `${t('btnLoading')} (${Math.round(currentRowLoading.progress)}%)...` : t('btnLoad')}
                 </Button>
             </div>
             <div className="flex items-center gap-2 border-l pl-4">
-                <span className="text-gray-500 whitespace-nowrap">Min Scope:</span>
+                <span className="text-gray-500 whitespace-nowrap">{t('minScope')}:</span>
                 <input 
                   type="number" 
                   step="0.1" 
@@ -839,7 +1247,7 @@ export default function App() {
                   onChange={(e) => setMinScope(parseFloat(e.target.value))} 
                   className="w-16 bg-white text-gray-900 border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500"
                 />
-                <Button variant="secondary" onClick={handleAcceptWorks} disabled={!selectedRowId}>Auto Accept</Button>
+                <Button variant="secondary" onClick={handleAcceptWorks} disabled={!selectedRowId}>{t('btnAutoAccept')}</Button>
             </div>
         </div>
       )}
@@ -847,11 +1255,11 @@ export default function App() {
       {activeTab === "cost" && selectedCell && (
          <div className="bg-white border-b px-6 py-2 flex items-center gap-4 text-sm shadow-sm z-10">
              <span className="font-medium text-gray-500">
-                Selected: <span className="text-blue-600 font-bold">{DISCIPLINES.find(d=>d.id===selectedCell.r)?.code}</span> vs <span className="text-blue-600 font-bold">{DISCIPLINES.find(d=>d.id===selectedCell.c)?.code}</span>
+                {t('selected')}: <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.r)?.code}</span> vs <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.c)?.code}</span>
              </span>
              <div className="h-4 w-px bg-gray-300 mx-2"></div>
              <Button onClick={handleGenScenarios} disabled={!!currentCellLoading}>
-                {currentCellLoading ? `Thinking (${currentCellLoading.step})...` : "Generate Scenarios (LLM)"}
+                {currentCellLoading ? `${t('btnThinking')} (${currentCellLoading.step})...` : t('btnGenerate')}
              </Button>
          </div>
       )}
@@ -865,8 +1273,8 @@ export default function App() {
             {/* Matrix View */}
             <div className={`flex flex-col transition-all duration-300 ease-in-out ${selectedRowId && panelOpen ? 'h-1/2' : 'h-full'}`}>
                 <h2 className="text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider flex justify-between items-center">
-                    <span>Rank Matrix</span>
-                    {selectedRowId && <span className="text-xs font-normal text-gray-400">Click row header to toggle drawer</span>}
+                    <span>{t('rankMatrix')}</span>
+                    {selectedRowId && <span className="text-xs font-normal text-gray-400">{t('toggleDrawer')}</span>}
                 </h2>
                 {renderMatrix("collision")}
             </div>
@@ -881,7 +1289,7 @@ export default function App() {
                          >
                              <div className="flex flex-col">
                                 <span className="text-sm font-semibold text-gray-700">
-                                    Works: {DISCIPLINES.find(d => d.id === selectedRowId)?.code} <span className="text-gray-400 font-normal">({works.filter(w => w.categoryId === selectedRowId).length} items)</span>
+                                    {t('worksPanel')}: {localizedDisciplines.find(d => d.id === selectedRowId)?.code} <span className="text-gray-400 font-normal">({works.filter(w => w.categoryId === selectedRowId).length} items)</span>
                                 </span>
                                 {currentRowLoading && (
                                     <span className="text-xs text-blue-500 font-medium animate-pulse">
@@ -890,7 +1298,7 @@ export default function App() {
                                 )}
                              </div>
                              <div className="flex items-center gap-2 text-blue-600 text-sm font-medium">
-                                <span>Show Panel</span>
+                                <span>{t('showPanel')}</span>
                                 <ToggleButton open={false} onClick={() => setPanelOpen(true)} />
                              </div>
                          </div>
@@ -903,15 +1311,15 @@ export default function App() {
                              )}
 
                             <h3 className="font-semibold text-gray-700 flex items-center gap-2">
-                                Works: {DISCIPLINES.find(d => d.id === selectedRowId)?.code} - {DISCIPLINES.find(d => d.id === selectedRowId)?.name}
+                                {t('worksPanel')}: {localizedDisciplines.find(d => d.id === selectedRowId)?.code} - {localizedDisciplines.find(d => d.id === selectedRowId)?.name}
                                 {currentRowLoading && <span className="text-xs font-normal text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{currentRowLoading.step}</span>}
                             </h3>
                             <div className="flex items-center gap-4">
                                 <span className="text-xs font-mono bg-gray-200 px-2 py-1 rounded text-gray-600">
-                                    Rank {DISCIPLINES.find(d => d.id === selectedRowId)?.rank}
+                                    Rank {localizedDisciplines.find(d => d.id === selectedRowId)?.rank}
                                 </span>
                                 <div className="flex items-center gap-1 text-gray-500 hover:text-gray-800 cursor-pointer" onClick={() => setPanelOpen(false)}>
-                                    <span className="text-xs font-medium uppercase">Hide</span>
+                                    <span className="text-xs font-medium uppercase">{t('hide')}</span>
                                     <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
                                 </div>
                             </div>
@@ -928,13 +1336,13 @@ export default function App() {
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-gray-50 text-gray-500 font-medium sticky top-0 z-10">
                                     <tr>
-                                        <th className="p-3 border-b">Name</th>
-                                        <th className="p-3 border-b">Price</th>
-                                        <th className="p-3 border-b">Unit</th>
-                                        <th className="p-3 border-b">Source</th>
-                                        <th className="p-3 border-b">Score</th>
-                                        <th className="p-3 border-b">Status</th>
-                                        <th className="p-3 border-b text-right">Action</th>
+                                        <th className="p-3 border-b">{t('table.name')}</th>
+                                        <th className="p-3 border-b">{t('table.price')}</th>
+                                        <th className="p-3 border-b">{t('table.unit')}</th>
+                                        <th className="p-3 border-b">{t('table.source')}</th>
+                                        <th className="p-3 border-b">{t('table.score')}</th>
+                                        <th className="p-3 border-b">{t('table.status')}</th>
+                                        <th className="p-3 border-b text-right">{t('table.action')}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y">
@@ -968,7 +1376,7 @@ export default function App() {
                                         </tr>
                                     ))}
                                     {!currentRowLoading && works.filter(w => w.categoryId === selectedRowId).length === 0 && (
-                                        <tr><td colSpan={7} className="p-8 text-center text-gray-400">No works loaded. Enter URL and click Load.</td></tr>
+                                        <tr><td colSpan={7} className="p-8 text-center text-gray-400">{t('noWorks')}</td></tr>
                                     )}
                                 </tbody>
                             </table>
@@ -985,8 +1393,8 @@ export default function App() {
                  {/* Matrix */}
                  <div className={`flex flex-col transition-all duration-300 ease-in-out ${selectedCell && panelOpen ? 'h-1/2' : 'h-full'}`}>
                      <h2 className="text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider flex justify-between items-center">
-                        <span>Cost Matrix</span>
-                        {selectedCell && <span className="text-xs font-normal text-gray-400">Click cell to toggle detail panel</span>}
+                        <span>{t('costMatrix')}</span>
+                        {selectedCell && <span className="text-xs font-normal text-gray-400">{t('toggleDetail')}</span>}
                      </h2>
                      {renderMatrix("cost")}
                  </div>
@@ -1001,16 +1409,16 @@ export default function App() {
                             >
                                 <div className="flex flex-col">
                                     <span className="text-sm font-semibold text-gray-700">
-                                        Scenarios: {DISCIPLINES.find(d => d.id === selectedCell.r)?.code} vs {DISCIPLINES.find(d => d.id === selectedCell.c)?.code}
+                                        {t('scenarios')}: {localizedDisciplines.find(d => d.id === selectedCell.r)?.code} vs {localizedDisciplines.find(d => d.id === selectedCell.c)?.code}
                                     </span>
                                     {currentCellLoading && (
                                         <span className="text-xs text-blue-500 font-medium animate-pulse">
-                                            Generating Scenarios... ({Math.round(currentCellLoading.progress)}%)
+                                            {t('steps.generating')} ({Math.round(currentCellLoading.progress)}%)
                                         </span>
                                     )}
                                 </div>
                                 <div className="flex items-center gap-2 text-blue-600 text-sm font-medium">
-                                    <span>Show Panel</span>
+                                    <span>{t('showPanel')}</span>
                                     <ToggleButton open={false} onClick={() => setPanelOpen(true)} />
                                 </div>
                             </div>
@@ -1027,9 +1435,9 @@ export default function App() {
                                 )}
                                 
                                 <div className="p-3 border-b bg-gray-50 font-semibold text-gray-700 flex justify-between items-center">
-                                    <span>Scenarios</span>
+                                    <span>{t('scenarios')}</span>
                                     <div className="flex items-center gap-1 text-gray-500 hover:text-gray-800 cursor-pointer" onClick={() => setPanelOpen(false)}>
-                                        <span className="text-xs font-medium uppercase">Hide</span>
+                                        <span className="text-xs font-medium uppercase">{t('hide')}</span>
                                         <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
                                     </div>
                                 </div>
@@ -1037,8 +1445,8 @@ export default function App() {
                                     <table className="w-full text-sm">
                                         <thead className="bg-gray-50 text-gray-500 sticky top-0">
                                             <tr>
-                                                <th className="p-3 text-left border-b">Name</th>
-                                                <th className="p-3 text-left border-b">Total Cost</th>
+                                                <th className="p-3 text-left border-b">{t('table.name')}</th>
+                                                <th className="p-3 text-left border-b">{t('table.totalCost')}</th>
                                                 <th className="p-3 w-10 border-b"></th>
                                             </tr>
                                         </thead>
@@ -1066,7 +1474,7 @@ export default function App() {
                                                 </tr>
                                             ))}
                                             {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).length === 0 && (
-                                                <tr><td colSpan={3} className="p-8 text-center text-gray-400">No scenarios generated. Click "Generate Scenarios" above.</td></tr>
+                                                <tr><td colSpan={3} className="p-8 text-center text-gray-400">{t('noScenarios')}</td></tr>
                                             )}
                                         </tbody>
                                     </table>
@@ -1080,14 +1488,14 @@ export default function App() {
                                         <div className="p-3 border-b bg-gray-50 space-y-3">
                                             {/* Editable Header */}
                                             <div>
-                                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Scenario Name</label>
+                                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{t('scenarioName')}</label>
                                                 <Input 
                                                     value={activeScenario.name} 
                                                     onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, name: e.target.value} : s))}
                                                 />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Description</label>
+                                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{t('description')}</label>
                                                 <textarea 
                                                     className="w-full bg-white text-gray-900 border border-gray-300 rounded px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[60px]" 
                                                     rows={4} 
@@ -1104,15 +1512,15 @@ export default function App() {
                                                 value={workToAddId}
                                                 onChange={(e) => setWorkToAddId(e.target.value)}
                                             >
-                                                <option value="">-- Select work to add manually --</option>
+                                                <option value="">{t('addManual')}</option>
                                                 {availableWorksForScenario.map(w => (
                                                     <option key={w.id} value={w.id}>{w.name} (${w.price}/{w.unit})</option>
                                                 ))}
                                             </select>
-                                            <Button onClick={handleAddManualWork} disabled={!workToAddId} className="py-1.5">Add</Button>
+                                            <Button onClick={handleAddManualWork} disabled={!workToAddId} className="py-1.5">{t('btnAdd')}</Button>
                                             <div className="w-px h-6 bg-gray-300 mx-1"></div>
                                             <Button variant="secondary" className="text-xs px-2 py-1.5" onClick={handleMatchWorks} disabled={generalLoading}>
-                                                {generalLoading ? "Matching..." : "Auto-Suggest (LLM)"}
+                                                {generalLoading ? t('btnMatching') : t('btnAutoSuggest')}
                                             </Button>
                                         </div>
 
@@ -1175,8 +1583,8 @@ export default function App() {
                                                 })}
                                                 {activeScenario.works.length === 0 && (
                                                     <div className="text-center text-gray-400 mt-10 p-4 border-2 border-dashed rounded">
-                                                        <p>No works added yet.</p>
-                                                        <p className="text-xs mt-2">Use the dropdown above to add works manually or click "Auto-Suggest" to let AI find suitable works.</p>
+                                                        <p>{t('noWorksAdded')}</p>
+                                                        <p className="text-xs mt-2">{t('noWorksAddedHint')}</p>
                                                     </div>
                                                 )}
                                             </div>
@@ -1184,7 +1592,7 @@ export default function App() {
                                     </>
                                 ) : (
                                     <div className="flex-1 flex items-center justify-center text-gray-400 bg-gray-50">
-                                        <p>Select a scenario to view and edit details</p>
+                                        <p>{t('selectScenario')}</p>
                                     </div>
                                 )}
                             </div>
@@ -1198,34 +1606,49 @@ export default function App() {
         {activeTab === "settings" && (
             <div className="max-w-2xl mx-auto w-full mt-10">
                 <div className="bg-white border rounded shadow-sm p-6 space-y-6">
-                    <h2 className="text-xl font-bold text-gray-800">Settings</h2>
+                    <h2 className="text-xl font-bold text-gray-800">{t('settingsTitle')}</h2>
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">{t('apiKeyLabel')}</label>
                             <Input 
                                 type="password" 
                                 value={settings.apiKey} 
                                 onChange={(e:any) => setSettings(s => ({...s, apiKey: e.target.value}))}
                                 placeholder="Enter Google GenAI API Key"
                             />
-                            <p className="text-xs text-gray-500 mt-1">Stored in app state (reset on refresh).</p>
+                            <p className="text-xs text-gray-500 mt-1">{t('apiKeyHint')}</p>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">{t('modelLabel')}</label>
                             <Input 
                                 value={settings.model} 
                                 onChange={(e:any) => setSettings(s => ({...s, model: e.target.value}))}
                             />
                         </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">{t('languageLabel')}</label>
+                            <div className="flex bg-gray-100 rounded p-1 w-fit">
+                                <button 
+                                    className={`px-4 py-1.5 rounded text-sm font-medium transition-all ${settings.language === 'en' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                    onClick={() => setSettings(s => ({...s, language: 'en'}))}
+                                >
+                                    English
+                                </button>
+                                <button 
+                                    className={`px-4 py-1.5 rounded text-sm font-medium transition-all ${settings.language === 'ru' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                    onClick={() => setSettings(s => ({...s, language: 'ru'}))}
+                                >
+                                    Русский
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="pt-4 border-t">
-                            <h3 className="font-medium mb-2">Data Management (Persistence)</h3>
-                             <p className="text-sm text-gray-600 mb-4">
-                                Data is automatically saved to your browser's LocalStorage. 
-                                To save to a file (e.g., for GitHub repo sync), export the database as JSON.
-                            </p>
+                            <h3 className="font-medium mb-2">{t('dataMgmt')}</h3>
+                             <p className="text-sm text-gray-600 mb-4">{t('dataMgmtHint')}</p>
                             <div className="flex gap-3 items-center">
                                 <Button variant="secondary" onClick={handleExportData}>
-                                    Download DB (.json)
+                                    {t('btnExport')}
                                 </Button>
                                 <div className="relative">
                                     <input 
@@ -1235,7 +1658,7 @@ export default function App() {
                                         onChange={handleImportData}
                                     />
                                     <Button variant="secondary">
-                                        Import DB (.json)
+                                        {t('btnImport')}
                                     </Button>
                                 </div>
                                 <span className="text-xs text-gray-500">
@@ -1244,15 +1667,15 @@ export default function App() {
                             </div>
                         </div>
                         <div className="pt-4 border-t">
-                            <h3 className="font-medium mb-2">System Status</h3>
+                            <h3 className="font-medium mb-2">{t('systemStatus')}</h3>
                             <div className="flex gap-2">
                                 <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm">
                                     <div className={`w-2 h-2 rounded-full ${settings.apiKey ? 'bg-green-500' : 'bg-red-500'}`}/>
-                                    API Configured
+                                    {t('apiConfigured')}
                                 </div>
                                 <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm">
                                     <div className="w-2 h-2 rounded-full bg-blue-500"/>
-                                    LocalStorage Active
+                                    {t('storageActive')}
                                 </div>
                             </div>
                         </div>
@@ -1265,8 +1688,8 @@ export default function App() {
         {activeTab === "logs" && (
             <div className="h-full bg-white border rounded shadow-sm flex flex-col">
                 <div className="p-4 border-b bg-gray-50 font-bold text-gray-700 flex justify-between">
-                    <span>Request Logs</span>
-                    <span className="text-sm font-normal text-gray-500">Total Tokens: {logs.reduce((a,b) => a + b.tokensUsed, 0)}</span>
+                    <span>{t('logsTitle')}</span>
+                    <span className="text-sm font-normal text-gray-500">{t('totalTokens')}: {logs.reduce((a,b) => a + b.tokensUsed, 0)}</span>
                 </div>
                 <div className="flex-1 overflow-auto">
                     <table className="w-full text-sm text-left">
@@ -1296,7 +1719,7 @@ export default function App() {
                                 </tr>
                             ))}
                             {logs.length === 0 && (
-                                <tr><td colSpan={5} className="p-8 text-center text-gray-400">No logs yet.</td></tr>
+                                <tr><td colSpan={5} className="p-8 text-center text-gray-400">{t('noLogs')}</td></tr>
                             )}
                         </tbody>
                     </table>
