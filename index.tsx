@@ -318,22 +318,21 @@ const safeParseJSON = (text: string) => {
   try {
     return JSON.parse(cleaned);
   } catch (e) {
-    // Attempt to recover truncated JSON by finding the last closing bracket/brace
-    // This often happens if maxOutputTokens cuts off the response
-    try {
-        if (cleaned.startsWith('[')) {
-            // Attempt to close array
+    // Attempt to recover truncated JSON (specifically arrays)
+    // This handles the "hanging" issue when maxOutputTokens is hit
+    if (cleaned.trim().startsWith('[') && !cleaned.trim().endsWith(']')) {
+         try {
+             // Find the last valid closing object brace '}'
              const lastCloseObj = cleaned.lastIndexOf('}');
              if (lastCloseObj > 0) {
+                 // Close the array manually
                  const salvaged = cleaned.substring(0, lastCloseObj + 1) + ']';
+                 console.warn("Recovered truncated JSON array.");
                  return JSON.parse(salvaged);
              }
-        } else if (cleaned.startsWith('{')) {
-            // Attempt to close object
-            // ... (implement if needed for specific structures)
-        }
-    } catch (e2) {
-        // Recovery failed
+         } catch (e2) {
+             // Recovery failed
+         }
     }
     
     console.warn("JSON Parse Failed (Cleaned):", cleaned.substring(0, 100) + "...");
@@ -376,7 +375,7 @@ class LLMService {
     }
   }
 
-  async parseWorks(url: string, disciplines: {code: string, name: string, description: string}[], lang: 'en' | 'ru'): Promise<{ works: any[], tokens: number }> {
+  async parseWorks(url: string, targetDiscipline: {code: string, name: string, description: string, keywords: string}, lang: 'en' | 'ru'): Promise<{ works: any[], tokens: number }> {
     if (!this.ai) throw new Error("API Key not configured");
     
     const langPrompt = lang === 'ru' ? "Output ONLY in Russian language." : "Output ONLY in English language.";
@@ -385,21 +384,24 @@ class LLMService {
       Act as a construction cost estimator. 
       Target URL context: ${url}
       
-      Generate a list of exactly 20 construction work items that might be found on a pricing page like this.
-      Focus on repair, cutting, drilling, dismantling, and installation works relevant to these disciplines:
-      ${disciplines.map(d => `${d.code} - ${d.name} (${d.description})`).join(", ")}.
+      Task: Extract exactly 20 construction work items from the context that are MOST RELEVANT to the following discipline:
+      Code: ${targetDiscipline.code}
+      Name: ${targetDiscipline.name}
+      Description: ${targetDiscipline.description}
+      Keywords: ${targetDiscipline.keywords}
       
-      IMPORTANT RULES:
-      1. Do NOT include the full HTML of the page.
-      2. Keep "name" concise (under 10 words).
-      3. Return ONLY valid JSON.
+      IMPORTANT: 
+      1. Prioritize works that match the Keywords (e.g., if keywords mention "concrete", find concrete works).
+      2. If specific works are not found, include general construction works.
+      3. Do NOT include the full HTML.
+      4. Return ONLY valid JSON.
       
       ${langPrompt}
       
       Return JSON:
       {
         "items": [
-          { "name": "Drilling D50mm", "price": 1500, "unit": "pcs", "suggestedCategoryCode": "КР" }
+          { "name": "Drilling D50mm", "price": 1500, "unit": "pcs" }
         ]
       }
     `;
@@ -409,7 +411,7 @@ class LLMService {
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        maxOutputTokens: 8000, // Increased limit for Flash models
+        maxOutputTokens: 8000, 
         responseSchema: {
             type: Type.OBJECT,
             properties: {
@@ -420,8 +422,7 @@ class LLMService {
                         properties: {
                             name: { type: Type.STRING },
                             price: { type: Type.NUMBER },
-                            unit: { type: Type.STRING },
-                            suggestedCategoryCode: { type: Type.STRING }
+                            unit: { type: Type.STRING }
                         }
                     }
                 }
@@ -814,21 +815,28 @@ export default function App() {
     if (!urlInput || !targetRowId) return;
     if (loadingRows[targetRowId]) return;
 
+    const targetCategory = localizedDisciplines.find(d => d.id === targetRowId)!;
+
     startProgress(targetRowId, setLoadingRows, t('steps.parsing'));
     setPanelOpen(true);
     let totalTokens = 0;
 
     try {
-      // Step 1: Parse Works
+      // Step 1: Parse Works (Targeting Specific Category)
       const { works: rawWorks, tokens: t1 } = await llmService.parseWorks(
           urlInput, 
-          localizedDisciplines.map(d => ({code: d.code, name: d.name, description: d.description})),
+          {
+            code: targetCategory.code,
+            name: targetCategory.name,
+            description: targetCategory.description,
+            keywords: targetCategory.keywords
+          },
           settings.language
       );
       totalTokens += t1;
       
       if (!rawWorks || rawWorks.length === 0) {
-           throw new Error("No works parsed from URL/Context.");
+           throw new Error(`No works parsed for category ${targetCategory.code} from URL/Context.`);
       }
 
       updateStep(targetRowId, setLoadingRows, t('steps.classifying'));
@@ -838,15 +846,13 @@ export default function App() {
       let t2 = 0;
       
       try {
-          const category = localizedDisciplines.find(d => d.id === targetRowId)!;
-          // Pass category keywords for better context
-          const clsResult = await llmService.classifyWorks(rawWorks, category.name, category.description, category.keywords);
+          const clsResult = await llmService.classifyWorks(rawWorks, targetCategory.name, targetCategory.description, targetCategory.keywords);
           classified = clsResult.classified;
           t2 = clsResult.tokens;
           totalTokens += t2;
       } catch (clsError: any) {
           console.warn("Classification failed, works will be loaded without scores.", clsError);
-          addLog("Classify Works", "error", `Classification failed: ${clsError.message}`);
+          addLog("Classify Works", "error", `Classification failed for ${targetCategory.code}: ${clsError.message}`);
           // Proceed with empty classification -> scores will be 0
       }
 
@@ -870,11 +876,10 @@ export default function App() {
       });
 
       setWorks(prev => [...prev, ...newWorks]);
-      const category = localizedDisciplines.find(d => d.id === targetRowId)!;
-      addLog("Load Works", "success", `Loaded ${newWorks.length} works for ${category.code}`, totalTokens);
+      addLog("Load Works", "success", `Loaded ${newWorks.length} works for ${targetCategory.code}`, totalTokens);
 
     } catch (e: any) {
-      addLog("Load Works", "error", e.message, totalTokens);
+      addLog("Load Works", "error", `${targetCategory.code}: ${e.message}`, totalTokens);
       // Clean up state immediately on error
       setLoadingRows(prev => {
          const newState = { ...prev };
@@ -1076,6 +1081,11 @@ export default function App() {
         {localizedDisciplines.map(r => {
           const style = getDisciplineStyle(r);
           const isRowLoading = loadingRows[r.id];
+          
+          // Stats for Collision View
+          const rowWorks = works.filter(w => w.categoryId === r.id);
+          const totalWorks = rowWorks.length;
+          const acceptedWorks = rowWorks.filter(w => w.status === 'accepted').length;
 
           return (
           <React.Fragment key={r.id}>
@@ -1108,6 +1118,16 @@ export default function App() {
                <span style={{ color: style.text }} className="relative z-10">{r.code}</span>
                <span className="text-[10px] font-normal opacity-80 truncate max-w-full relative z-10" style={{ color: style.text }} title={r.name}>{r.name}</span>
                
+               {/* Works Stats Badge */}
+               {type === 'collision' && totalWorks > 0 && !isRowLoading && (
+                  <div className="flex gap-1 mt-1 relative z-10">
+                      <span className="text-[9px] bg-white/60 text-black px-1.5 py-0.5 rounded shadow-sm border border-black/10" title="Total Loaded">{totalWorks}</span>
+                      {acceptedWorks > 0 && (
+                          <span className="text-[9px] bg-green-100 text-green-800 px-1.5 py-0.5 rounded shadow-sm border border-green-200" title="Accepted">✓ {acceptedWorks}</span>
+                      )}
+                  </div>
+               )}
+
                {/* Show Loading Status Text if Selected */}
                {isRowLoading && selectedRowId === r.id && (
                    <span className="text-[9px] text-blue-700 bg-white/80 rounded px-1 mt-1 relative z-10 w-fit">{isRowLoading.step} ({Math.round(isRowLoading.progress)}%)</span>
