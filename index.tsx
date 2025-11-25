@@ -122,7 +122,8 @@ const TRANSLATIONS = {
         classifying: "Classifying...",
         analyzing: "Analyzing Collision...",
         finalizing: "Finalizing...",
-        generating: "Generating Scenarios..."
+        generating: "Generating Scenarios...",
+        matching: "Matching Works..."
     },
     disciplines: {
         AR_WALLS_NAME: "Walls", AR_WALLS_DESC: "Architectural walls, partitions",
@@ -226,7 +227,8 @@ const TRANSLATIONS = {
         classifying: "Классификация...",
         analyzing: "Анализ коллизии...",
         finalizing: "Завершение...",
-        generating: "Генерация сценариев..."
+        generating: "Генерация сценариев...",
+        matching: "Подбор работ..."
     },
     disciplines: {
         AR_WALLS_NAME: "Стены", AR_WALLS_DESC: "Архитектурные стены, перегородки",
@@ -319,7 +321,6 @@ const safeParseJSON = (text: string) => {
     return JSON.parse(cleaned);
   } catch (e) {
     // Attempt to recover truncated JSON (specifically arrays)
-    // This handles the "hanging" issue when maxOutputTokens is hit
     if (cleaned.trim().startsWith('[') && !cleaned.trim().endsWith(']')) {
          try {
              // Find the last valid closing object brace '}'
@@ -336,7 +337,6 @@ const safeParseJSON = (text: string) => {
     }
     
     console.warn("JSON Parse Failed (Cleaned):", cleaned.substring(0, 100) + "...");
-    // Return null instead of throwing to prevent app crash
     return null;
   }
 };
@@ -481,7 +481,6 @@ class LLMService {
     });
 
     const result = safeParseJSON(response.text);
-    // Ensure we always return an array, even if parsing failed (null) or structure was wrong
     const validResult = Array.isArray(result) ? result : [];
     
     return { classified: validResult, tokens: response.usageMetadata?.totalTokenCount || 0 };
@@ -500,15 +499,15 @@ class LLMService {
       Output 3 distinct, realistic scenarios to resolve this collision.
       
       Requirements:
-      1. 'name': A very short title (max 5-6 words) summarizing the method.
-      2. 'description': A detailed technical explanation of the work required, why it's chosen, and its complexity.
+      1. 'name': MUST BE an EXTREMELY SHORT Title (max 4-5 words). Example: "Local Shift", "Offset", "Re-routing".
+      2. 'description': A LONG, Detailed technical explanation of the work required.
+      3. Do NOT mix up name and description.
       
       ${langPrompt}
 
-      Return JSON:
+      Return JSON Array:
       [
-        { "name": "Local Shift", "description": "Move the element slightly..." },
-        { "name": "Re-routing", "description": "Completely change route..." }
+        { "name": "Local Shift", "description": "Move the element slightly..." }
       ]
     `;
 
@@ -523,7 +522,7 @@ class LLMService {
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    name: { type: Type.STRING, description: "Short title (5-6 words max)" },
+                    name: { type: Type.STRING, description: "EXTREMELY SHORT title (max 5 words)" },
                     description: { type: Type.STRING, description: "Detailed technical explanation" }
                 }
             }
@@ -532,7 +531,21 @@ class LLMService {
     });
     
     const result = safeParseJSON(response.text);
-    return { scenarios: Array.isArray(result) ? result : [], tokens: response.usageMetadata?.totalTokenCount || 0 };
+    // Robustness: check if result is an object containing "scenarios" or "items" instead of array
+    let scenarios = [];
+    if (Array.isArray(result)) {
+        scenarios = result;
+    } else if (result && Array.isArray(result.scenarios)) {
+        scenarios = result.scenarios;
+    } else if (result && Array.isArray(result.items)) {
+        scenarios = result.items;
+    } else if (result && typeof result === 'object' && Object.keys(result).length > 0) {
+        // Fallback: try to find any array property
+        const val = Object.values(result).find(v => Array.isArray(v));
+        if (val) scenarios = val as any[];
+    }
+
+    return { scenarios: scenarios, tokens: response.usageMetadata?.totalTokenCount || 0 };
   }
 
   async matchWorksToScenario(scenario: any, availableWorks: WorkItem[]): Promise<{ matches: any[], tokens: number }> {
@@ -540,18 +553,21 @@ class LLMService {
 
     const workList = availableWorks.map(w => ({ id: w.id, name: w.name, unit: w.unit }));
     const prompt = `
-      Scenario: ${scenario.name}
-      Details: ${scenario.description}
+      Role: Construction Cost Estimator.
+      Task: Identify items from the "Available Works" list that are required to perform the construction scenario described below.
       
-      Task: Select applicable works from the Available Works list to execute this scenario.
+      Scenario Name: ${scenario.name}
+      Description: ${scenario.description}
+      
       Available Works: ${JSON.stringify(workList)}
       
-      Requirements:
-      1. Use ONLY works from the provided list.
-      2. Use the exact 'id' for 'workId'.
-      3. Estimate quantity. Default to 1 if unsure.
+      Instructions:
+      1. Select ALL works that seem relevant to the scenario description.
+      2. If an exact match isn't found, pick the closest functional equivalent (e.g. if "Drilling" is needed, pick "Diamond Drilling" or "Hole cutting").
+      3. Be generous in selection to ensure the cost is captured.
+      4. Return an empty array ONLY if absolutely no works are relevant.
       
-      Return JSON Array.
+      Output Format: JSON Array of objects with 'workId' and 'quantity'.
     `;
 
     const response = await this.ai.models.generateContent({
@@ -722,6 +738,7 @@ export default function App() {
   // Loading States
   const [loadingRows, setLoadingRows] = useState<Record<string, LoadingState>>({});
   const [loadingCells, setLoadingCells] = useState<Record<string, LoadingState>>({});
+  const [loadingMatches, setLoadingMatches] = useState<Record<string, LoadingState>>({});
   const [generalLoading, setGeneralLoading] = useState(false); // Fallback
   
   // Hooks
@@ -852,7 +869,7 @@ export default function App() {
           totalTokens += t2;
       } catch (clsError: any) {
           console.warn("Classification failed, works will be loaded without scores.", clsError);
-          addLog("Classify Works", "error", `Classification failed for ${targetCategory.code}: ${clsError.message}`);
+          addLog("Classify Works", "error", `Classification failed for ${targetCategory.code} (${targetCategory.name}): ${clsError.message}`);
           // Proceed with empty classification -> scores will be 0
       }
 
@@ -876,10 +893,10 @@ export default function App() {
       });
 
       setWorks(prev => [...prev, ...newWorks]);
-      addLog("Load Works", "success", `Loaded ${newWorks.length} works for ${targetCategory.code}`, totalTokens);
+      addLog("Load Works", "success", `Loaded ${newWorks.length} works for ${targetCategory.code} (${targetCategory.name})`, totalTokens);
 
     } catch (e: any) {
-      addLog("Load Works", "error", `${targetCategory.code}: ${e.message}`, totalTokens);
+      addLog("Load Works", "error", `${targetCategory.code} (${targetCategory.name}): ${e.message}`, totalTokens);
       // Clean up state immediately on error
       setLoadingRows(prev => {
          const newState = { ...prev };
@@ -926,6 +943,10 @@ export default function App() {
       
       updateStep(cellKey, setLoadingCells, t('steps.finalizing'));
 
+      if (!genScenarios || genScenarios.length === 0) {
+           throw new Error("LLM returned 0 scenarios. Try again or check model configuration.");
+      }
+
       const newScenarios: Scenario[] = genScenarios.map((s: any) => ({
         id: generateId(),
         matrixKey: cellKey,
@@ -935,9 +956,12 @@ export default function App() {
       }));
 
       setScenarios(prev => [...prev, ...newScenarios]);
-      addLog("Generate Scenarios", "success", `Generated ${newScenarios.length} scenarios for ${rDisc.code}/${cDisc.code}`, tokens);
+      addLog("Generate Scenarios", "success", `Row: ${rDisc.code} vs Col: ${cDisc.code}. Generated ${newScenarios.length} scenarios.`, tokens);
     } catch (e: any) {
-      addLog("Generate Scenarios", "error", e.message);
+      const rDisc = localizedDisciplines.find(d => d.id === selectedCell.r);
+      const cDisc = localizedDisciplines.find(d => d.id === selectedCell.c);
+      addLog("Generate Scenarios", "error", `Row: ${rDisc?.code} vs Col: ${cDisc?.code}. Error: ${e.message}`);
+      
       // Force cleanup
       setLoadingCells(prev => {
          const newState = { ...prev };
@@ -955,14 +979,20 @@ export default function App() {
     
     // Filter works for the ROW category. Allow pending works to be matched too.
     const availableWorks = works.filter(w => w.categoryId === selectedCell.r);
+    const categoryName = localizedDisciplines.find(d => d.id === selectedCell.r)?.name;
+    const categoryCode = localizedDisciplines.find(d => d.id === selectedCell.r)?.code;
 
     if (availableWorks.length === 0) {
-        const rowName = localizedDisciplines.find(d => d.id === selectedCell.r)?.name || selectedCell.r;
-        addLog("Match Works", "error", `No works found for category '${rowName}'. Please load works in Collision tab.`);
+        addLog("Match Works", "error", `No works found for category '${categoryCode} ${categoryName}'. Please load works in Collision tab.`);
         return;
     }
 
-    setGeneralLoading(true);
+    // Do NOT set generalLoading to true, to allow UI interaction
+    // setGeneralLoading(true); 
+    
+    // Use the scenario ID to track progress
+    startProgress(selectedScenarioId, setLoadingMatches, t('steps.matching'));
+
     try {
       const scenario = scenarios.find(s => s.id === selectedScenarioId)!;
       
@@ -984,7 +1014,7 @@ export default function App() {
       }).filter((sw: any) => sw.workId !== "");
 
       if (scenarioWorks.length === 0) {
-         addLog("Match Works", "error", "LLM could not match any works to the scenario.", tokens);
+         addLog("Match Works", "error", `Scenario: '${scenario.name}'. LLM could not match any works from ${categoryCode}.`, tokens);
       } else {
          setScenarios(prev => prev.map(s => {
             if (s.id === selectedScenarioId) {
@@ -992,12 +1022,13 @@ export default function App() {
             }
             return s;
         }));
-        addLog("Match Works", "success", `Matched ${scenarioWorks.length} works to scenario`, tokens);
+        addLog("Match Works", "success", `Scenario: '${scenario.name}'. Matched ${scenarioWorks.length} works from ${categoryCode}.`, tokens);
       }
     } catch (e: any) {
         addLog("Match Works", "error", e.message);
     } finally {
-      setGeneralLoading(false);
+      // setGeneralLoading(false);
+      stopProgress(selectedScenarioId, setLoadingMatches);
     }
   };
 
@@ -1118,8 +1149,8 @@ export default function App() {
                <span style={{ color: style.text }} className="relative z-10">{r.code}</span>
                <span className="text-[10px] font-normal opacity-80 truncate max-w-full relative z-10" style={{ color: style.text }} title={r.name}>{r.name}</span>
                
-               {/* Works Stats Badge */}
-               {type === 'collision' && totalWorks > 0 && !isRowLoading && (
+               {/* Works Stats Badge - Show in both modes if works exist */}
+               {totalWorks > 0 && !isRowLoading && (
                   <div className="flex gap-1 mt-1 relative z-10">
                       <span className="text-[9px] bg-white/60 text-black px-1.5 py-0.5 rounded shadow-sm border border-black/10" title="Total Loaded">{totalWorks}</span>
                       {acceptedWorks > 0 && (
@@ -1153,6 +1184,8 @@ export default function App() {
                  // Cost Matrix
                  const costData = getCellCostRange(r.id, c.id);
                  const isCellLoading = loadingCells[cellKey];
+                 // Check if any scenario in this cell is matching
+                 const isMatching = scenarios.some(s => s.matrixKey === cellKey && loadingMatches[s.id]);
                  
                  if (isDiagonal) return <div key={c.id} className="bg-gray-100 border-b border-r border-gray-200" />;
                  
@@ -1180,6 +1213,11 @@ export default function App() {
                             <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
                             <span className="text-[9px] text-blue-600 font-medium animate-pulse">{isCellLoading.step}</span>
                          </>
+                     )}
+                     
+                     {/* Matching Indicator in Cell */}
+                     {!isCellLoading && isMatching && (
+                         <div className="absolute top-1 right-1 w-2 h-2 bg-orange-500 rounded-full animate-pulse z-10" title="Auto-Suggesting Works..."></div>
                      )}
 
                      {!isCellLoading && costData ? (
@@ -1213,6 +1251,7 @@ export default function App() {
   
   const currentRowLoading = selectedRowId ? loadingRows[selectedRowId] : undefined;
   const currentCellLoading = selectedCell ? loadingCells[`${selectedCell.r}:${selectedCell.c}`] : undefined;
+  const currentMatchLoading = activeScenario ? loadingMatches[activeScenario.id] : undefined;
 
 
   // --- Main Layout ---
@@ -1221,10 +1260,7 @@ export default function App() {
     <div className="h-full flex flex-col bg-[var(--bg-app)]">
       {/* Top Bar */}
       <div className="bg-white border-b border-[var(--border)] px-6 py-3 flex items-center justify-between shadow-sm z-20">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600 text-white p-1.5 rounded font-bold font-mono">CMWC</div>
-          <h1 className="font-semibold text-lg text-gray-800">{t('appTitle')}</h1>
-        </div>
+        {/* SWAPPED: Tabs on Left */}
         <div className="flex bg-gray-100 p-1 rounded-lg">
           {(["collision", "cost", "settings", "logs"] as const).map(tab => (
             <button
@@ -1235,6 +1271,12 @@ export default function App() {
               {t(`tabs.${tab}`)}
             </button>
           ))}
+        </div>
+        
+        {/* SWAPPED: Logo on Right */}
+        <div className="flex items-center gap-3">
+          <h1 className="font-semibold text-lg text-gray-800">{t('appTitle')}</h1>
+          <div className="bg-blue-600 text-white p-1.5 rounded font-bold font-mono">CMWC</div>
         </div>
       </div>
 
@@ -1502,9 +1544,19 @@ export default function App() {
                             </div>
 
                             {/* Scenario Works Detail & Editing */}
-                            <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col">
+                            <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
                                 {activeScenario ? (
                                     <>
+                                        {/* Overlay for Matching Process */}
+                                        {currentMatchLoading && (
+                                            <div className="absolute inset-0 bg-white/70 z-30 flex flex-col items-center justify-center backdrop-blur-[1px]">
+                                                <div className="w-48 bg-gray-200 rounded-full h-2 mb-2 overflow-hidden">
+                                                    <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{width: `${currentMatchLoading.progress}%`}}></div>
+                                                </div>
+                                                <span className="text-sm font-bold text-blue-700 animate-pulse">{currentMatchLoading.step}</span>
+                                            </div>
+                                        )}
+
                                         <div className="p-3 border-b bg-gray-50 space-y-3">
                                             {/* Editable Header */}
                                             <div>
@@ -1539,8 +1591,9 @@ export default function App() {
                                             </select>
                                             <Button onClick={handleAddManualWork} disabled={!workToAddId} className="py-1.5">{t('btnAdd')}</Button>
                                             <div className="w-px h-6 bg-gray-300 mx-1"></div>
-                                            <Button variant="secondary" className="text-xs px-2 py-1.5" onClick={handleMatchWorks} disabled={generalLoading}>
-                                                {generalLoading ? t('btnMatching') : t('btnAutoSuggest')}
+                                            {/* Removed disabled={generalLoading} */}
+                                            <Button variant="secondary" className="text-xs px-2 py-1.5" onClick={handleMatchWorks} disabled={!!currentMatchLoading}>
+                                                {currentMatchLoading ? t('btnMatching') : t('btnAutoSuggest')}
                                             </Button>
                                         </div>
 
