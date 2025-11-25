@@ -51,6 +51,11 @@ interface AppSettings {
   model: string;
 }
 
+interface LoadingState {
+    step: string;
+    progress: number;
+}
+
 // --- Constants & Initial Data ---
 
 const DISCIPLINES: Discipline[] = [
@@ -79,12 +84,14 @@ const cleanJson = (text: string | undefined) => {
 };
 
 const getDisciplineStyle = (d: Discipline) => {
-  // Override for VK and OV to have unified colors
+  // Override for VK and OV to have unified, distinct colors
   if (d.code.startsWith("ВК")) {
-    return { bg: "#bae6fd", text: "#0369a1" }; // Light Sky Blue
+    // Vibrant Blue for Water/Sewerage
+    return { bg: "#0284c7", text: "#ffffff" }; 
   }
   if (d.code.startsWith("ОВ")) {
-    return { bg: "#fed7aa", text: "#c2410c" }; // Light Orange
+    // Vibrant Orange for HVAC
+    return { bg: "#ea580c", text: "#ffffff" }; 
   }
 
   // Fallback to Rank defaults
@@ -207,17 +214,17 @@ class LLMService {
     if (!this.ai) throw new Error("API Key not configured");
 
     const prompt = `
-      Context: A collision occurred between ${rowDisc.code} ${rowDisc.name} (Rank ${rowDisc.rank}) and ${colDisc.code} ${colDisc.name} (Rank ${colDisc.rank}).
-      Row Element Status: ${rowDisc.description}.
+      Role: Senior Construction Engineer.
+      Task: Resolve a collision between "${rowDisc.code} ${rowDisc.name}" (Row/Modifier) and "${colDisc.code} ${colDisc.name}" (Column/Obstacle).
+      Constraint: We must modify the Row element (${rowDisc.name}).
       
-      Generate 3 realistic scenarios to resolve this collision by modifying the ROW element (${rowDisc.name}).
-      Focus on the cost/effort of changing the ROW element to accommodate the other.
+      Output 3 distinct, realistic scenarios to resolve this collision.
       
-      Return JSON:
-      [
-        { "name": "Local Shift", "description": "Move the element slightly..." },
-        { "name": "Re-routing", "description": "Completely change route..." }
-      ]
+      JSON Structure Guidelines:
+      1. name: A SHORT title (3-5 words max). Do NOT include explanation here. Example: "Shift Wall Position", "Create Opening in Wall".
+      2. description: A DETAILED technical explanation (2-3 sentences). Explain what work is done and why.
+
+      Return strictly a JSON Array.
     `;
 
     const response = await this.ai.models.generateContent({
@@ -230,8 +237,8 @@ class LLMService {
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    name: { type: Type.STRING },
-                    description: { type: Type.STRING }
+                    name: { type: Type.STRING, description: "Short title of the scenario (3-5 words)" },
+                    description: { type: Type.STRING, description: "Detailed technical explanation" }
                 }
             }
         }
@@ -246,21 +253,18 @@ class LLMService {
 
     const workList = availableWorks.map(w => ({ id: w.id, name: w.name, unit: w.unit }));
     const prompt = `
-      Scenario: ${scenario.name} - ${scenario.description}
+      Scenario: ${scenario.name}
+      Details: ${scenario.description}
       
-      Select works from the provided list required to execute this scenario. Estimate quantities.
-      
+      Task: Select applicable works from the Available Works list to execute this scenario.
       Available Works: ${JSON.stringify(workList)}
       
-      IMPORTANT: 
-      1. You must ONLY use works from the provided list.
-      2. Use the exact 'id' from the list for the 'workId' field.
-      3. Estimate a realistic quantity.
+      Requirements:
+      1. Use ONLY works from the provided list.
+      2. Use the exact 'id' for 'workId'.
+      3. Estimate quantity. Default to 1 if unsure.
       
-      Return JSON:
-      [
-        { "workId": "exact_id_from_list", "quantity": 5 }
-      ]
+      Return JSON Array.
     `;
 
     const response = await this.ai.models.generateContent({
@@ -319,11 +323,11 @@ const Input = (props: any) => (
 
 const ToggleButton = ({ open, onClick }: { open: boolean, onClick: () => void }) => (
     <button 
-        onClick={onClick}
-        className="p-1 rounded hover:bg-gray-200 text-gray-500 transition-colors focus:outline-none"
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        className="p-1.5 rounded-full hover:bg-black/10 text-current transition-colors focus:outline-none flex items-center justify-center"
         title={open ? "Collapse Panel" : "Expand Panel"}
     >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform duration-200 ${open ? 'rotate-180' : 'rotate-0'}`}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transform transition-transform duration-200 ${open ? 'rotate-180' : 'rotate-0'}`}>
             <polyline points="18 15 12 9 6 15"></polyline>
         </svg>
     </button>
@@ -361,10 +365,14 @@ export default function App() {
 
   // Transient State
   const [urlInput, setUrlInput] = useState("https://garantstroikompleks.ru/prajs-list");
-  const [loading, setLoading] = useState(false);
   const [minScope, setMinScope] = useState(0.7);
   const [workToAddId, setWorkToAddId] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
+  
+  // Loading States
+  const [loadingRows, setLoadingRows] = useState<Record<string, LoadingState>>({});
+  const [loadingCells, setLoadingCells] = useState<Record<string, LoadingState>>({});
+  const [generalLoading, setGeneralLoading] = useState(false); // Fallback
 
   // Init LLM
   useEffect(() => {
@@ -393,28 +401,70 @@ export default function App() {
     setLogs(prev => [newLog, ...prev]);
   };
 
+  // --- Handlers: Data Export/Import ---
+
+  const handleExportData = () => {
+    const data = { works, scenarios, timestamp: Date.now() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cmwc_data.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addLog("Export", "success", "Database exported to JSON file");
+  };
+
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = JSON.parse(evt.target?.result as string);
+        if (Array.isArray(data.works)) setWorks(data.works);
+        if (Array.isArray(data.scenarios)) setScenarios(data.scenarios);
+        addLog("Import", "success", `Imported ${data.works?.length || 0} works and ${data.scenarios?.length || 0} scenarios`);
+        alert("Data imported successfully!");
+      } catch (err) {
+        addLog("Import", "error", "Failed to parse file");
+        alert("Failed to parse file. Ensure it is a valid JSON export.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   // --- Handlers: Works ---
 
   const handleLoadWorks = async () => {
-    if (!urlInput || !selectedRowId) return;
-    setLoading(true);
+    const targetRowId = selectedRowId; 
+    
+    if (!urlInput || !targetRowId) return;
+    if (loadingRows[targetRowId]) return;
+
+    setLoadingRows(prev => ({ ...prev, [targetRowId]: { step: 'Parsing Page...', progress: 10 } }));
     setPanelOpen(true);
+
     try {
-      // 1. Parse (Simulated)
       const { works: rawWorks, tokens: t1 } = await llmService.parseWorks(urlInput, DISCIPLINES);
       
-      // 2. Classify for current category
-      const category = DISCIPLINES.find(d => d.id === selectedRowId)!;
+      setLoadingRows(prev => ({ ...prev, [targetRowId]: { step: 'Classifying...', progress: 50 } }));
+
+      const category = DISCIPLINES.find(d => d.id === targetRowId)!;
       const { classified, tokens: t2 } = await llmService.classifyWorks(rawWorks, category.name, category.description);
+
+      setLoadingRows(prev => ({ ...prev, [targetRowId]: { step: 'Finalizing...', progress: 90 } }));
 
       const newWorks: WorkItem[] = rawWorks.map((rw: any) => {
         const cls = classified.find((c: any) => c.name === rw.name);
         const score = cls ? cls.score : 0;
         return {
           id: generateId(),
-          categoryId: selectedRowId,
+          categoryId: targetRowId,
           name: rw.name,
-          price: rw.price,
+          price: typeof rw.price === 'number' ? rw.price : 0, // Ensure number
           unit: rw.unit,
           source: urlInput,
           score: score,
@@ -427,7 +477,11 @@ export default function App() {
     } catch (e: any) {
       addLog("Load Works", "error", e.message);
     } finally {
-      setLoading(false);
+      setLoadingRows(prev => {
+        const newState = { ...prev };
+        delete newState[targetRowId];
+        return newState;
+      });
     }
   };
 
@@ -445,17 +499,26 @@ export default function App() {
 
   const handleGenScenarios = async () => {
     if (!selectedCell) return;
-    setLoading(true);
+    const cellKey = `${selectedCell.r}:${selectedCell.c}`;
+    
+    // Prevent double submission
+    if (loadingCells[cellKey]) return;
+
+    setLoadingCells(prev => ({ ...prev, [cellKey]: { step: 'Analyzing Collision...', progress: 20 } }));
     setPanelOpen(true);
+    setGeneralLoading(true);
+
     try {
       const rDisc = DISCIPLINES.find(d => d.id === selectedCell.r)!;
       const cDisc = DISCIPLINES.find(d => d.id === selectedCell.c)!;
       
       const { scenarios: genScenarios, tokens } = await llmService.generateScenarios(rDisc, cDisc);
       
+      setLoadingCells(prev => ({ ...prev, [cellKey]: { step: 'Finalizing...', progress: 80 } }));
+
       const newScenarios: Scenario[] = genScenarios.map((s: any) => ({
         id: generateId(),
-        matrixKey: `${selectedCell.r}:${selectedCell.c}`,
+        matrixKey: cellKey,
         name: s.name,
         description: s.description,
         works: []
@@ -466,7 +529,12 @@ export default function App() {
     } catch (e: any) {
       addLog("Generate Scenarios", "error", e.message);
     } finally {
-      setLoading(false);
+      setGeneralLoading(false);
+      setLoadingCells(prev => {
+        const newState = { ...prev };
+        delete newState[cellKey];
+        return newState;
+      });
     }
   };
 
@@ -482,17 +550,26 @@ export default function App() {
         return;
     }
 
-    setLoading(true);
+    setGeneralLoading(true);
     try {
       const scenario = scenarios.find(s => s.id === selectedScenarioId)!;
       
       const { matches, tokens } = await llmService.matchWorksToScenario(scenario, availableWorks);
       
-      const scenarioWorks: ScenarioWork[] = matches.map((m: any) => ({
-        workId: availableWorks.find(w => w.id === m.workId || w.name === m.workId)?.id || "", // fuzzy match fallback
-        quantity: m.quantity,
-        active: true
-      })).filter((sw: any) => sw.workId !== "");
+      const scenarioWorks: ScenarioWork[] = matches.map((m: any) => {
+        let qty = 1;
+        // Strict quantity parsing
+        if (m.quantity !== undefined && m.quantity !== null) {
+            const parsed = parseFloat(m.quantity);
+            if (!isNaN(parsed) && parsed > 0) qty = parsed;
+        }
+
+        return {
+            workId: availableWorks.find(w => w.id === m.workId || w.name === m.workId)?.id || "", 
+            quantity: qty, 
+            active: true
+        };
+      }).filter((sw: any) => sw.workId !== "");
 
       if (scenarioWorks.length === 0) {
          addLog("Match Works", "error", "LLM could not match any works to the scenario.", tokens);
@@ -508,7 +585,7 @@ export default function App() {
     } catch (e: any) {
         addLog("Match Works", "error", e.message);
     } finally {
-      setLoading(false);
+      setGeneralLoading(false);
     }
   };
 
@@ -548,7 +625,10 @@ export default function App() {
     return s.works.reduce((acc, sw) => {
       if (!sw.active) return acc;
       const w = works.find(wk => wk.id === sw.workId);
-      return acc + (w ? w.price * sw.quantity : 0);
+      // Ensure we don't propagate NaN
+      const price = (w && typeof w.price === 'number' && !isNaN(w.price)) ? w.price : 0;
+      const qty = (typeof sw.quantity === 'number' && !isNaN(sw.quantity)) ? sw.quantity : 0;
+      return acc + (price * qty);
     }, 0);
   };
 
@@ -556,6 +636,10 @@ export default function App() {
     const cellScenarios = scenarios.filter(s => s.matrixKey === `${rId}:${cId}`);
     if (cellScenarios.length === 0) return null;
     const costs = cellScenarios.map(calculateScenarioCost);
+    // Optional: You could filter out 0 costs if they represent 'empty' scenarios, 
+    // but sometimes 0 is valid (e.g., 'Do nothing'). 
+    // Keeping all valid numbers.
+    
     const min = Math.min(...costs);
     const max = Math.max(...costs);
     return { min, max, count: cellScenarios.length };
@@ -575,7 +659,7 @@ export default function App() {
             return (
                 <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm" style={{ backgroundColor: style.bg }}>
                     <span className="font-bold" style={{ color: style.text }}>{d.code}</span>
-                    <span className="text-[10px] leading-tight mt-1 text-gray-600 max-w-[90px] truncate" title={d.name}>{d.name}</span>
+                    <span className="text-[10px] leading-tight mt-1 opacity-80 max-w-[90px] truncate" style={{ color: style.text }} title={d.name}>{d.name}</span>
                 </div>
             );
         })}
@@ -583,16 +667,19 @@ export default function App() {
         {/* Rows */}
         {DISCIPLINES.map(r => {
           const style = getDisciplineStyle(r);
+          const isRowLoading = loadingRows[r.id];
+
           return (
           <React.Fragment key={r.id}>
             {/* Row Label */}
             <div 
-              className={`sticky left-0 z-10 p-3 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors
-                ${selectedRowId === r.id && type === 'collision' ? 'ring-inset ring-2 ring-blue-500' : ''}`}
+              className={`sticky left-0 z-10 p-3 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors relative overflow-hidden
+                ${selectedRowId === r.id && type === 'collision' ? 'ring-inset ring-2 ring-blue-500' : ''}
+                ${isRowLoading ? 'shadow-[inset_0_0_10px_rgba(37,99,235,0.2)] border-l-4 border-l-blue-500' : ''}
+                `}
               onClick={() => {
                   if (type === 'collision') {
                       if (selectedRowId === r.id) {
-                          // Toggle if same row clicked
                           setPanelOpen(!panelOpen);
                       } else {
                           setSelectedRowId(r.id);
@@ -602,8 +689,21 @@ export default function App() {
               }}
               style={{ backgroundColor: style.bg }}
             >
-               <span style={{ color: style.text }}>{r.code}</span>
-               <span className="text-[10px] font-normal text-gray-600 truncate max-w-full" title={r.name}>{r.name}</span>
+               {/* Loading Progress Bar Background */}
+               {isRowLoading && (
+                   <div className="absolute bottom-0 left-0 h-1 bg-blue-500 transition-all duration-300 z-20" style={{ width: `${isRowLoading.progress}%` }}></div>
+               )}
+               {isRowLoading && (
+                   <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
+               )}
+
+               <span style={{ color: style.text }} className="relative z-10">{r.code}</span>
+               <span className="text-[10px] font-normal opacity-80 truncate max-w-full relative z-10" style={{ color: style.text }} title={r.name}>{r.name}</span>
+               
+               {/* Show Loading Status Text if Selected */}
+               {isRowLoading && selectedRowId === r.id && (
+                   <span className="text-[9px] text-blue-700 bg-white/80 rounded px-1 mt-1 relative z-10 w-fit">{isRowLoading.step}</span>
+               )}
             </div>
 
             {/* Cells */}
@@ -624,13 +724,16 @@ export default function App() {
               } else {
                  // Cost Matrix
                  const costData = getCellCostRange(r.id, c.id);
+                 const isCellLoading = loadingCells[cellKey];
+                 
                  if (isDiagonal) return <div key={c.id} className="bg-gray-100 border-b border-r border-gray-200" />;
                  
                  return (
                    <div 
                     key={c.id} 
-                    className={`border-b border-r border-gray-200 p-2 flex flex-col items-center justify-center cursor-pointer transition-all h-16
+                    className={`border-b border-r border-gray-200 p-2 flex flex-col items-center justify-center cursor-pointer transition-all h-16 relative overflow-hidden
                         ${isSelected ? 'bg-blue-100 ring-inset ring-2 ring-blue-600 z-0' : 'hover:bg-gray-50'}
+                        ${isCellLoading ? 'bg-blue-50' : ''}
                     `}
                     onClick={() => {
                         if (selectedCell?.r === r.id && selectedCell?.c === c.id) {
@@ -642,14 +745,23 @@ export default function App() {
                         }
                     }}
                    >
-                     {costData ? (
+                     {/* Cell Loading State */}
+                     {isCellLoading && (
+                         <>
+                            <div className="absolute bottom-0 left-0 h-1 bg-blue-500 transition-all duration-300 z-10" style={{ width: `${isCellLoading.progress}%` }}></div>
+                            <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
+                            <span className="text-[9px] text-blue-600 font-medium animate-pulse">{isCellLoading.step}</span>
+                         </>
+                     )}
+
+                     {!isCellLoading && costData ? (
                         <>
                            <span className="text-sm font-bold text-gray-800">${costData.min}-{costData.max}</span>
                            <span className="text-[10px] text-gray-500 bg-white px-1 rounded border mt-1">{costData.count} var</span>
                         </>
-                     ) : (
+                     ) : !isCellLoading ? (
                         <span className="text-lg text-gray-200 font-light">-</span>
-                     )}
+                     ) : null}
                    </div>
                  );
               }
@@ -670,6 +782,9 @@ export default function App() {
       if (!selectedScenarioId) return null;
       return scenarios.find(s => s.id === selectedScenarioId);
   }, [scenarios, selectedScenarioId]);
+  
+  const currentRowLoading = selectedRowId ? loadingRows[selectedRowId] : undefined;
+  const currentCellLoading = selectedCell ? loadingCells[`${selectedCell.r}:${selectedCell.c}`] : undefined;
 
 
   // --- Main Layout ---
@@ -706,8 +821,11 @@ export default function App() {
                     onChange={(e:any) => setUrlInput(e.target.value)}
                     className="max-w-md"
                 />
-                <Button onClick={handleLoadWorks} disabled={!selectedRowId || loading}>
-                    {loading ? "Parsing..." : "Load Works"}
+                <Button 
+                    onClick={handleLoadWorks} 
+                    disabled={!selectedRowId || !!currentRowLoading}
+                >
+                    {currentRowLoading ? `Loading (${Math.round(currentRowLoading.progress)}%)...` : "Load Works"}
                 </Button>
             </div>
             <div className="flex items-center gap-2 border-l pl-4">
@@ -732,8 +850,8 @@ export default function App() {
                 Selected: <span className="text-blue-600 font-bold">{DISCIPLINES.find(d=>d.id===selectedCell.r)?.code}</span> vs <span className="text-blue-600 font-bold">{DISCIPLINES.find(d=>d.id===selectedCell.c)?.code}</span>
              </span>
              <div className="h-4 w-px bg-gray-300 mx-2"></div>
-             <Button onClick={handleGenScenarios} disabled={loading}>
-                {loading ? "Thinking..." : "Generate Scenarios (LLM)"}
+             <Button onClick={handleGenScenarios} disabled={!!currentCellLoading}>
+                {currentCellLoading ? `Thinking (${currentCellLoading.step})...` : "Generate Scenarios (LLM)"}
              </Button>
          </div>
       )}
@@ -758,28 +876,55 @@ export default function App() {
                 <>
                     {!panelOpen && (
                          <div 
-                            className="bg-white border rounded shadow p-2 flex justify-between items-center cursor-pointer hover:bg-gray-50"
+                            className="bg-white border-l-4 border-l-blue-500 border rounded shadow p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors"
                             onClick={() => setPanelOpen(true)}
                          >
-                             <span className="text-sm font-semibold text-gray-600">
-                                Works: {DISCIPLINES.find(d => d.id === selectedRowId)?.code} ({works.filter(w => w.categoryId === selectedRowId).length} items)
-                             </span>
-                             <ToggleButton open={false} onClick={() => setPanelOpen(true)} />
+                             <div className="flex flex-col">
+                                <span className="text-sm font-semibold text-gray-700">
+                                    Works: {DISCIPLINES.find(d => d.id === selectedRowId)?.code} <span className="text-gray-400 font-normal">({works.filter(w => w.categoryId === selectedRowId).length} items)</span>
+                                </span>
+                                {currentRowLoading && (
+                                    <span className="text-xs text-blue-500 font-medium animate-pulse">
+                                        {currentRowLoading.step} ({Math.round(currentRowLoading.progress)}%)
+                                    </span>
+                                )}
+                             </div>
+                             <div className="flex items-center gap-2 text-blue-600 text-sm font-medium">
+                                <span>Show Panel</span>
+                                <ToggleButton open={false} onClick={() => setPanelOpen(true)} />
+                             </div>
                          </div>
                     )}
                     <div className={`bg-white border rounded shadow-lg flex flex-col transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden border-0'}`}>
-                        <div className="p-3 border-b bg-gray-50 flex justify-between items-center">
+                        <div className="p-3 border-b bg-gray-50 flex justify-between items-center relative">
+                            {/* Loading Overlay for Panel Header */}
+                             {currentRowLoading && (
+                                <div className="absolute bottom-0 left-0 h-1 bg-blue-500 transition-all duration-300 z-20" style={{ width: `${currentRowLoading.progress}%` }}></div>
+                             )}
+
                             <h3 className="font-semibold text-gray-700 flex items-center gap-2">
                                 Works: {DISCIPLINES.find(d => d.id === selectedRowId)?.code} - {DISCIPLINES.find(d => d.id === selectedRowId)?.name}
+                                {currentRowLoading && <span className="text-xs font-normal text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{currentRowLoading.step}</span>}
                             </h3>
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs font-mono bg-gray-200 px-2 py-1 rounded">
+                            <div className="flex items-center gap-4">
+                                <span className="text-xs font-mono bg-gray-200 px-2 py-1 rounded text-gray-600">
                                     Rank {DISCIPLINES.find(d => d.id === selectedRowId)?.rank}
                                 </span>
-                                <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
+                                <div className="flex items-center gap-1 text-gray-500 hover:text-gray-800 cursor-pointer" onClick={() => setPanelOpen(false)}>
+                                    <span className="text-xs font-medium uppercase">Hide</span>
+                                    <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
+                                </div>
                             </div>
                         </div>
-                        <div className="flex-1 overflow-auto p-0">
+                        <div className="flex-1 overflow-auto p-0 relative">
+                            {/* Content Loading Overlay if empty and loading */}
+                            {currentRowLoading && works.filter(w => w.categoryId === selectedRowId).length === 0 && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10 backdrop-blur-[1px]">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
+                                    <span className="text-sm text-gray-600">{currentRowLoading.step}</span>
+                                </div>
+                            )}
+
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-gray-50 text-gray-500 font-medium sticky top-0 z-10">
                                     <tr>
@@ -822,7 +967,7 @@ export default function App() {
                                             </td>
                                         </tr>
                                     ))}
-                                    {works.filter(w => w.categoryId === selectedRowId).length === 0 && (
+                                    {!currentRowLoading && works.filter(w => w.categoryId === selectedRowId).length === 0 && (
                                         <tr><td colSpan={7} className="p-8 text-center text-gray-400">No works loaded. Enter URL and click Load.</td></tr>
                                     )}
                                 </tbody>
@@ -850,19 +995,43 @@ export default function App() {
                  {selectedCell && (
                      <>
                         {!panelOpen && (
-                            <div className="bg-white border rounded shadow p-2 flex justify-between items-center cursor-pointer hover:bg-gray-50" onClick={() => setPanelOpen(true)}>
-                                <span className="text-sm font-semibold text-gray-600">
-                                    Scenarios: {DISCIPLINES.find(d => d.id === selectedCell.r)?.code} vs {DISCIPLINES.find(d => d.id === selectedCell.c)?.code}
-                                </span>
-                                <ToggleButton open={false} onClick={() => setPanelOpen(true)} />
+                            <div 
+                                className="bg-white border-l-4 border-l-blue-500 border rounded shadow p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors" 
+                                onClick={() => setPanelOpen(true)}
+                            >
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-semibold text-gray-700">
+                                        Scenarios: {DISCIPLINES.find(d => d.id === selectedCell.r)?.code} vs {DISCIPLINES.find(d => d.id === selectedCell.c)?.code}
+                                    </span>
+                                    {currentCellLoading && (
+                                        <span className="text-xs text-blue-500 font-medium animate-pulse">
+                                            Generating Scenarios... ({Math.round(currentCellLoading.progress)}%)
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2 text-blue-600 text-sm font-medium">
+                                    <span>Show Panel</span>
+                                    <ToggleButton open={false} onClick={() => setPanelOpen(true)} />
+                                </div>
                             </div>
                         )}
                         <div className={`flex gap-4 transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden'}`}>
                             {/* Scenarios List */}
-                            <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col">
+                            <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
+                                {/* Loading Overlay for List */}
+                                {currentCellLoading && (
+                                    <div className="absolute inset-0 bg-white/50 z-20 flex flex-col items-center justify-center backdrop-blur-[1px]">
+                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
+                                        <span className="text-sm font-medium text-gray-700">{currentCellLoading.step}</span>
+                                    </div>
+                                )}
+                                
                                 <div className="p-3 border-b bg-gray-50 font-semibold text-gray-700 flex justify-between items-center">
                                     <span>Scenarios</span>
-                                    <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
+                                    <div className="flex items-center gap-1 text-gray-500 hover:text-gray-800 cursor-pointer" onClick={() => setPanelOpen(false)}>
+                                        <span className="text-xs font-medium uppercase">Hide</span>
+                                        <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
+                                    </div>
                                 </div>
                                 <div className="flex-1 overflow-auto">
                                     <table className="w-full text-sm">
@@ -921,7 +1090,7 @@ export default function App() {
                                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Description</label>
                                                 <textarea 
                                                     className="w-full bg-white text-gray-900 border border-gray-300 rounded px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[60px]" 
-                                                    rows={2} 
+                                                    rows={4} 
                                                     value={activeScenario.description} 
                                                     onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, description: e.target.value} : s))}
                                                 />
@@ -942,8 +1111,8 @@ export default function App() {
                                             </select>
                                             <Button onClick={handleAddManualWork} disabled={!workToAddId} className="py-1.5">Add</Button>
                                             <div className="w-px h-6 bg-gray-300 mx-1"></div>
-                                            <Button variant="secondary" className="text-xs px-2 py-1.5" onClick={handleMatchWorks} disabled={loading}>
-                                                {loading ? "Matching..." : "Auto-Suggest (LLM)"}
+                                            <Button variant="secondary" className="text-xs px-2 py-1.5" onClick={handleMatchWorks} disabled={generalLoading}>
+                                                {generalLoading ? "Matching..." : "Auto-Suggest (LLM)"}
                                             </Button>
                                         </div>
 
@@ -1049,6 +1218,32 @@ export default function App() {
                             />
                         </div>
                         <div className="pt-4 border-t">
+                            <h3 className="font-medium mb-2">Data Management (Persistence)</h3>
+                             <p className="text-sm text-gray-600 mb-4">
+                                Data is automatically saved to your browser's LocalStorage. 
+                                To save to a file (e.g., for GitHub repo sync), export the database as JSON.
+                            </p>
+                            <div className="flex gap-3 items-center">
+                                <Button variant="secondary" onClick={handleExportData}>
+                                    Download DB (.json)
+                                </Button>
+                                <div className="relative">
+                                    <input 
+                                        type="file" 
+                                        accept=".json"
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                        onChange={handleImportData}
+                                    />
+                                    <Button variant="secondary">
+                                        Import DB (.json)
+                                    </Button>
+                                </div>
+                                <span className="text-xs text-gray-500">
+                                    {works.length} works, {scenarios.length} scenarios loaded.
+                                </span>
+                            </div>
+                        </div>
+                        <div className="pt-4 border-t">
                             <h3 className="font-medium mb-2">System Status</h3>
                             <div className="flex gap-2">
                                 <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm">
@@ -1057,7 +1252,7 @@ export default function App() {
                                 </div>
                                 <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm">
                                     <div className="w-2 h-2 rounded-full bg-blue-500"/>
-                                    LocalStorage Active (Works: {works.length}, Scenarios: {scenarios.length})
+                                    LocalStorage Active
                                 </div>
                             </div>
                         </div>
