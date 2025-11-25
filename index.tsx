@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { GoogleGenAI, Type, Schema, HarmCategory, HarmBlockThreshold } from "@google/genai";
 
 // --- Types & Interfaces ---
 
@@ -93,6 +94,7 @@ const TRANSLATIONS = {
     noWorks: "No works loaded. Enter URL and click Load.",
     scenarios: "Scenarios",
     noScenarios: "No scenarios generated. Click \"Generate Scenarios\" above.",
+    generatingScenarios: "Generating scenarios from LLM...",
     scenarioName: "Scenario Name",
     description: "Description",
     addManual: "-- Select work to add manually --",
@@ -198,6 +200,7 @@ const TRANSLATIONS = {
     noWorks: "Работы не загружены. Введите URL и нажмите Загрузить.",
     scenarios: "Сценарии",
     noScenarios: "Сценарии не сгенерированы. Нажмите \"Сгенерировать сценарии\" выше.",
+    generatingScenarios: "Идет генерация сценариев...",
     scenarioName: "Название сценария",
     description: "Описание",
     addManual: "-- Выберите работу для добавления вручную --",
@@ -342,12 +345,16 @@ const safeParseJSON = (text: string) => {
 };
 
 const getDisciplineStyle = (d: Discipline) => {
-  // Override for VK and OV to have unified, distinct colors
+  // CONFIGURATION: Discipline Color Mapping
+  // All colors are now lighter pastels for better UI consistency
+  
   if (d.code.startsWith("ВК")) {
-    return { bg: "#0284c7", text: "#ffffff" }; 
+    // Pastel Blue for Water/Drainage
+    return { bg: "#e0f2fe", text: "#0369a1" }; // sky-100, sky-700
   }
   if (d.code.startsWith("ОВ")) {
-    return { bg: "#ea580c", text: "#ffffff" }; 
+    // Pastel Orange for HVAC
+    return { bg: "#ffedd5", text: "#c2410c" }; // orange-100, orange-700
   }
 
   // Fallback to Rank defaults
@@ -486,6 +493,8 @@ class LLMService {
     return { classified: validResult, tokens: response.usageMetadata?.totalTokenCount || 0 };
   }
 
+  // CONFIGURATION: LLM Prompts
+  // Modified to be less restrictive to prevent "0 scenarios" refusals.
   async generateScenarios(rowDisc: {code: string, name: string}, colDisc: {code: string, name: string}, lang: 'en' | 'ru'): Promise<{ scenarios: any[], tokens: number }> {
     if (!this.ai) throw new Error("API Key not configured");
 
@@ -493,15 +502,15 @@ class LLMService {
 
     const prompt = `
       Role: Senior Construction Engineer.
-      Task: Resolve a collision between "${rowDisc.code} ${rowDisc.name}" (Row/Modifier) and "${colDisc.code} ${colDisc.name}" (Column/Obstacle).
-      Constraint: We must modify the Row element (${rowDisc.name}).
-      
-      Output 3 distinct, realistic scenarios to resolve this collision.
+      Task: Provide 3 standard construction solutions for when a "${rowDisc.code} ${rowDisc.name}" element collides with a "${colDisc.code} ${colDisc.name}" element.
+      Focus on modifying the ${rowDisc.name} (Row element).
+
+      If a specific solution isn't obvious, provide generic standard resolutions such as "Local Shift", "Change Cross-Section", or "Rerouting".
       
       Requirements:
-      1. 'name': MUST BE an EXTREMELY SHORT Title (max 4-5 words). Example: "Local Shift", "Offset", "Re-routing".
-      2. 'description': A LONG, Detailed technical explanation of the work required.
-      3. Do NOT mix up name and description.
+      1. Name: A short title (2-5 words).
+      2. Description: A practical technical explanation of the work required.
+      3. Return ONLY valid JSON.
       
       ${langPrompt}
 
@@ -517,13 +526,20 @@ class LLMService {
       config: {
         responseMimeType: "application/json",
         maxOutputTokens: 2000,
+        // Set permissiveness to avoid blocking common construction terms like "cutting" or "breaking"
+        safetySettings: [
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
+        ],
         responseSchema: {
             type: Type.ARRAY,
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    name: { type: Type.STRING, description: "EXTREMELY SHORT title (max 5 words)" },
-                    description: { type: Type.STRING, description: "Detailed technical explanation" }
+                    name: { type: Type.STRING },
+                    description: { type: Type.STRING }
                 }
             }
         }
@@ -576,6 +592,9 @@ class LLMService {
         config: {
             responseMimeType: "application/json",
             maxOutputTokens: 2000,
+            safetySettings: [
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
+            ],
             responseSchema: {
                 type: Type.ARRAY,
                 items: {
@@ -1113,17 +1132,20 @@ export default function App() {
           const style = getDisciplineStyle(r);
           const isRowLoading = loadingRows[r.id];
           
-          // Stats for Collision View
+          // Stats for Collision View & Cost View (Unified)
           const rowWorks = works.filter(w => w.categoryId === r.id);
           const totalWorks = rowWorks.length;
           const acceptedWorks = rowWorks.filter(w => w.status === 'accepted').length;
-
+          
+          // Unified Row Header
+          const isSelectedRow = (type === "collision" && selectedRowId === r.id) || (type === "cost" && selectedCell?.r === r.id);
+          
           return (
           <React.Fragment key={r.id}>
             {/* Row Label */}
             <div 
-              className={`sticky left-0 z-10 p-3 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors relative overflow-hidden
-                ${selectedRowId === r.id && type === 'collision' ? 'ring-inset ring-2 ring-blue-500' : ''}
+              className={`sticky left-0 z-10 p-2 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors relative overflow-hidden min-h-[64px]
+                ${isSelectedRow ? 'ring-inset ring-2 ring-blue-500' : ''}
                 ${isRowLoading ? 'shadow-[inset_0_0_10px_rgba(37,99,235,0.2)] border-l-4 border-l-blue-500' : ''}
                 `}
               onClick={() => {
@@ -1135,6 +1157,7 @@ export default function App() {
                           setPanelOpen(true);
                       }
                   }
+                  // In Cost view, clicking row header doesn't select the row in the same way, but could
               }}
               style={{ backgroundColor: style.bg }}
             >
@@ -1146,22 +1169,24 @@ export default function App() {
                    <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
                )}
 
-               <span style={{ color: style.text }} className="relative z-10">{r.code}</span>
-               <span className="text-[10px] font-normal opacity-80 truncate max-w-full relative z-10" style={{ color: style.text }} title={r.name}>{r.name}</span>
+               <div className="flex flex-col items-start px-2 w-full">
+                    <span style={{ color: style.text }} className="relative z-10">{r.code}</span>
+                    <span className="text-[10px] font-normal opacity-80 truncate max-w-full relative z-10" style={{ color: style.text }} title={r.name}>{r.name}</span>
+               </div>
                
-               {/* Works Stats Badge - Show in both modes if works exist */}
+               {/* Works Stats Badge - Unified and Fixed to prevent artifacts */}
                {totalWorks > 0 && !isRowLoading && (
-                  <div className="flex gap-1 mt-1 relative z-10">
-                      <span className="text-[9px] bg-white/60 text-black px-1.5 py-0.5 rounded shadow-sm border border-black/10" title="Total Loaded">{totalWorks}</span>
+                  <div className="flex gap-1 mt-1.5 px-2 relative z-10 w-full overflow-hidden">
+                      <span className="text-[9px] bg-white/60 text-black px-1.5 py-0.5 rounded shadow-sm border border-black/5 whitespace-nowrap">{totalWorks}</span>
                       {acceptedWorks > 0 && (
-                          <span className="text-[9px] bg-green-100 text-green-800 px-1.5 py-0.5 rounded shadow-sm border border-green-200" title="Accepted">✓ {acceptedWorks}</span>
+                          <span className="text-[9px] bg-green-100 text-green-800 px-1.5 py-0.5 rounded shadow-sm border border-green-200 whitespace-nowrap">✓ {acceptedWorks}</span>
                       )}
                   </div>
                )}
 
                {/* Show Loading Status Text if Selected */}
-               {isRowLoading && selectedRowId === r.id && (
-                   <span className="text-[9px] text-blue-700 bg-white/80 rounded px-1 mt-1 relative z-10 w-fit">{isRowLoading.step} ({Math.round(isRowLoading.progress)}%)</span>
+               {isRowLoading && isSelectedRow && (
+                   <span className="text-[9px] text-blue-700 bg-white/80 rounded px-1 mx-2 mt-1 relative z-10 w-fit">{isRowLoading.step} ({Math.round(isRowLoading.progress)}%)</span>
                )}
             </div>
 
@@ -1488,59 +1513,62 @@ export default function App() {
                         <div className={`flex gap-4 transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden'}`}>
                             {/* Scenarios List */}
                             <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
-                                {/* Loading Overlay for List */}
-                                {currentCellLoading && (
-                                    <div className="absolute inset-0 bg-white/50 z-20 flex flex-col items-center justify-center backdrop-blur-[1px]">
+                                {/* Loading Overlay for List (Replaces content) */}
+                                {currentCellLoading ? (
+                                    <div className="absolute inset-0 bg-white z-20 flex flex-col items-center justify-center">
                                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
-                                        <span className="text-sm font-medium text-gray-700">{currentCellLoading.step}</span>
+                                        <span className="text-sm font-medium text-blue-600 animate-pulse">{t('generatingScenarios')}</span>
+                                        <span className="text-xs text-gray-400 mt-2">{currentCellLoading.step} ({Math.round(currentCellLoading.progress)}%)</span>
                                     </div>
+                                ) : (
+                                    <>
+                                        <div className="p-3 border-b bg-gray-50 font-semibold text-gray-700 flex justify-between items-center">
+                                            <span>{t('scenarios')}</span>
+                                            <div className="flex items-center gap-1 text-gray-500 hover:text-gray-800 cursor-pointer" onClick={() => setPanelOpen(false)}>
+                                                <span className="text-xs font-medium uppercase">{t('hide')}</span>
+                                                <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-auto">
+                                            <table className="w-full text-sm">
+                                                <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                                                    <tr>
+                                                        <th className="p-3 text-left border-b">{t('table.name')}</th>
+                                                        <th className="p-3 text-left border-b">{t('table.totalCost')}</th>
+                                                        <th className="p-3 w-10 border-b"></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y">
+                                                    {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).map(s => (
+                                                        <tr 
+                                                            key={s.id} 
+                                                            className={`cursor-pointer hover:bg-blue-50 ${selectedScenarioId === s.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''}`}
+                                                            onClick={() => setSelectedScenarioId(s.id)}
+                                                        >
+                                                            <td className="p-3">
+                                                                <div className="font-medium">{s.name}</div>
+                                                                <div className="text-xs text-gray-500 truncate max-w-[200px]">{s.description}</div>
+                                                            </td>
+                                                            <td className="p-3 font-mono font-medium text-blue-700">
+                                                                ${calculateScenarioCost(s)}
+                                                            </td>
+                                                            <td className="p-3">
+                                                                <button className="text-red-400 hover:text-red-600" onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setScenarios(prev => prev.filter(x => x.id !== s.id));
+                                                                    if(selectedScenarioId === s.id) setSelectedScenarioId(null);
+                                                                }}>×</button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                    {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).length === 0 && (
+                                                        <tr><td colSpan={3} className="p-8 text-center text-gray-400">{t('noScenarios')}</td></tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </>
                                 )}
-                                
-                                <div className="p-3 border-b bg-gray-50 font-semibold text-gray-700 flex justify-between items-center">
-                                    <span>{t('scenarios')}</span>
-                                    <div className="flex items-center gap-1 text-gray-500 hover:text-gray-800 cursor-pointer" onClick={() => setPanelOpen(false)}>
-                                        <span className="text-xs font-medium uppercase">{t('hide')}</span>
-                                        <ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
-                                    </div>
-                                </div>
-                                <div className="flex-1 overflow-auto">
-                                    <table className="w-full text-sm">
-                                        <thead className="bg-gray-50 text-gray-500 sticky top-0">
-                                            <tr>
-                                                <th className="p-3 text-left border-b">{t('table.name')}</th>
-                                                <th className="p-3 text-left border-b">{t('table.totalCost')}</th>
-                                                <th className="p-3 w-10 border-b"></th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).map(s => (
-                                                <tr 
-                                                    key={s.id} 
-                                                    className={`cursor-pointer hover:bg-blue-50 ${selectedScenarioId === s.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''}`}
-                                                    onClick={() => setSelectedScenarioId(s.id)}
-                                                >
-                                                    <td className="p-3">
-                                                        <div className="font-medium">{s.name}</div>
-                                                        <div className="text-xs text-gray-500 truncate max-w-[200px]">{s.description}</div>
-                                                    </td>
-                                                    <td className="p-3 font-mono font-medium text-blue-700">
-                                                        ${calculateScenarioCost(s)}
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <button className="text-red-400 hover:text-red-600" onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setScenarios(prev => prev.filter(x => x.id !== s.id));
-                                                            if(selectedScenarioId === s.id) setSelectedScenarioId(null);
-                                                        }}>×</button>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            {scenarios.filter(s => s.matrixKey === `${selectedCell.r}:${selectedCell.c}`).length === 0 && (
-                                                <tr><td colSpan={3} className="p-8 text-center text-gray-400">{t('noScenarios')}</td></tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
                             </div>
 
                             {/* Scenario Works Detail & Editing */}
