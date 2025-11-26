@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { GoogleGenAI, Type, Schema, HarmCategory, HarmBlockThreshold } from "@google/genai";
@@ -19,6 +18,7 @@ interface WorkItem {
   categoryId: string;
   name: string;
   price: number;
+  currency?: string; // Added currency field
   unit: string;
   source: string;
   score: number; // 0 to 1
@@ -49,7 +49,6 @@ interface LogEntry {
 }
 
 interface AppSettings {
-  apiKey: string;
   model: string;
   language: "en" | "ru";
 }
@@ -73,7 +72,7 @@ const TRANSLATIONS = {
     btnAutoAccept: "Auto Accept",
     selected: "Selected",
     btnGenerate: "Generate Scenarios (LLM)",
-    btnThinking: "Thinking",
+    btnThinking: "Generating",
     rankMatrix: "Rank Matrix",
     toggleDrawer: "Click row header to toggle drawer",
     costMatrix: "Cost Matrix",
@@ -113,6 +112,7 @@ const TRANSLATIONS = {
     dataMgmtHint: "Data is automatically saved to your browser's LocalStorage. To save to a file (e.g., for GitHub repo sync), export the database as JSON.",
     btnExport: "Download DB (.json)",
     btnImport: "Import DB (.json)",
+    btnReset: "Reset / Clear Data",
     systemStatus: "System Status",
     apiConfigured: "API Configured",
     storageActive: "LocalStorage Active",
@@ -122,7 +122,7 @@ const TRANSLATIONS = {
     steps: {
         parsing: "Parsing Page...",
         classifying: "Classifying...",
-        analyzing: "Analyzing Collision...",
+        analyzing: "Generating scenarios from LLM...",
         finalizing: "Finalizing...",
         generating: "Generating Scenarios...",
         matching: "Matching Works..."
@@ -179,7 +179,7 @@ const TRANSLATIONS = {
     btnAutoAccept: "Авто-принятие",
     selected: "Выбрано",
     btnGenerate: "Сгенерировать сценарии (LLM)",
-    btnThinking: "Думаю",
+    btnThinking: "Генерация",
     rankMatrix: "Матрица Рангов",
     toggleDrawer: "Нажмите на заголовок строки, чтобы открыть панель",
     costMatrix: "Матрица Стоимости",
@@ -219,6 +219,7 @@ const TRANSLATIONS = {
     dataMgmtHint: "Данные автоматически сохраняются в LocalStorage браузера. Для сохранения в файл (например, для Git) экспортируйте БД в JSON.",
     btnExport: "Скачать БД (.json)",
     btnImport: "Импортировать БД (.json)",
+    btnReset: "Сбросить / Очистить данные",
     systemStatus: "Статус системы",
     apiConfigured: "API Настроен",
     storageActive: "LocalStorage Активен",
@@ -228,7 +229,7 @@ const TRANSLATIONS = {
     steps: {
         parsing: "Парсинг страницы...",
         classifying: "Классификация...",
-        analyzing: "Анализ коллизии...",
+        analyzing: "Генерация сценариев...",
         finalizing: "Завершение...",
         generating: "Генерация сценариев...",
         matching: "Подбор работ..."
@@ -369,6 +370,8 @@ const getDisciplineStyle = (d: Discipline) => {
   }
 };
 
+const getCurrencySymbol = (lang: string) => lang === 'ru' ? '₽' : '$';
+
 // --- LLM Service ---
 
 class LLMService {
@@ -380,6 +383,18 @@ class LLMService {
       this.ai = new GoogleGenAI({ apiKey });
       this.modelName = model || "gemini-2.5-flash";
     }
+  }
+
+  private async safeGenerate(params: any): Promise<{ rawText: string, response: any }> {
+      try {
+          const response = await this.ai!.models.generateContent(params);
+          const rawText = response.text || "";
+          return { rawText, response };
+      } catch (e: any) {
+          // Capture API Status Code if available
+          const status = e.status || e.response?.status || e.statusCode || "Unknown";
+          throw new Error(`API Error [Status: ${status}]: ${e.message}`);
+      }
   }
 
   async parseWorks(url: string, targetDiscipline: {code: string, name: string, description: string, keywords: string}, lang: 'en' | 'ru'): Promise<{ works: any[], tokens: number }> {
@@ -398,22 +413,23 @@ class LLMService {
       Keywords: ${targetDiscipline.keywords}
       
       IMPORTANT: 
-      1. Prioritize works that match the Keywords (e.g., if keywords mention "concrete", find concrete works).
+      1. Prioritize works that match the Keywords (e.g. if keywords mention "concrete", find concrete works).
       2. If specific works are not found, include general construction works.
       3. Do NOT include the full HTML.
       4. Return ONLY valid JSON.
+      5. Extract the currency symbol or code if visible (e.g. RUB, ₽, $, USD). If not found, assume '${lang === 'ru' ? 'RUB' : 'USD'}'.
       
       ${langPrompt}
       
       Return JSON:
       {
         "items": [
-          { "name": "Drilling D50mm", "price": 1500, "unit": "pcs" }
+          { "name": "Drilling D50mm", "price": 1500, "currency": "RUB", "unit": "pcs" }
         ]
       }
     `;
 
-    const response = await this.ai.models.generateContent({
+    const { rawText, response } = await this.safeGenerate({
       model: this.modelName,
       contents: prompt,
       config: {
@@ -429,6 +445,7 @@ class LLMService {
                         properties: {
                             name: { type: Type.STRING },
                             price: { type: Type.NUMBER },
+                            currency: { type: Type.STRING, description: "Currency symbol or code (e.g. $, ₽, RUB, USD)" },
                             unit: { type: Type.STRING }
                         }
                     }
@@ -438,9 +455,13 @@ class LLMService {
       }
     });
 
-    const result = safeParseJSON(response.text);
+    const result = safeParseJSON(rawText);
+    if (!result || !result.items) {
+        throw new Error(`Parsing failed. Raw Response: ${rawText}`);
+    }
+
     return { 
-      works: result?.items || [], 
+      works: result.items || [], 
       tokens: response.usageMetadata?.totalTokenCount || 0 
     };
   }
@@ -468,7 +489,7 @@ class LLMService {
       Return JSON array of objects with 'name' and 'score'.
     `;
 
-     const response = await this.ai.models.generateContent({
+     const { rawText, response } = await this.safeGenerate({
       model: this.modelName,
       contents: prompt,
       config: {
@@ -487,15 +508,14 @@ class LLMService {
       }
     });
 
-    const result = safeParseJSON(response.text);
+    const result = safeParseJSON(rawText);
     const validResult = Array.isArray(result) ? result : [];
     
     return { classified: validResult, tokens: response.usageMetadata?.totalTokenCount || 0 };
   }
 
   // CONFIGURATION: LLM Prompts
-  // Modified to be less restrictive to prevent "0 scenarios" refusals.
-  async generateScenarios(rowDisc: {code: string, name: string}, colDisc: {code: string, name: string}, lang: 'en' | 'ru'): Promise<{ scenarios: any[], tokens: number }> {
+  async generateScenarios(rowDisc: {code: string, name: string}, colDisc: {code: string, name: string}, lang: 'en' | 'ru'): Promise<{ scenarios: any[], tokens: number, rawText: string }> {
     if (!this.ai) throw new Error("API Key not configured");
 
     const langPrompt = lang === 'ru' ? "Output strictly in Russian language." : "Output strictly in English language.";
@@ -510,23 +530,17 @@ class LLMService {
       Requirements:
       1. Name: A short title (2-5 words).
       2. Description: A practical technical explanation of the work required.
-      3. Return ONLY valid JSON.
       
       ${langPrompt}
-
-      Return JSON Array:
-      [
-        { "name": "Local Shift", "description": "Move the element slightly..." }
-      ]
     `;
 
-    const response = await this.ai.models.generateContent({
+    const { rawText, response } = await this.safeGenerate({
       model: this.modelName,
       contents: prompt,
       config: {
+        systemInstruction: "You are a JSON-only API helper. Output strictly a valid JSON array. The 'name' property MUST be a short string (under 10 words). The 'description' property contains the detailed explanation. Do not wrap in markdown.",
         responseMimeType: "application/json",
         maxOutputTokens: 2000,
-        // Set permissiveness to avoid blocking common construction terms like "cutting" or "breaking"
         safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -546,7 +560,7 @@ class LLMService {
       }
     });
     
-    const result = safeParseJSON(response.text);
+    const result = safeParseJSON(rawText);
     // Robustness: check if result is an object containing "scenarios" or "items" instead of array
     let scenarios = [];
     if (Array.isArray(result)) {
@@ -561,10 +575,33 @@ class LLMService {
         if (val) scenarios = val as any[];
     }
 
-    return { scenarios: scenarios, tokens: response.usageMetadata?.totalTokenCount || 0 };
+    if (!scenarios) {
+        throw new Error(`LLM returned 0 scenarios. Raw Response:\n${rawText}`);
+    }
+
+    // Post-processing: Fix name/description leaks
+    scenarios = scenarios.map((s: any) => {
+        let name = s.name || "Unknown Scenario";
+        let description = s.description || "";
+        
+        // Heuristic: If name is too long (likely a leaked description), try to fix
+        if (name.split(' ').length > 15 && description.length < name.length) {
+             if (!description) {
+                 // Move big name to description, create generic name
+                 description = name;
+                 name = "Proposed Solution (Auto-fix)";
+             } else {
+                 // Truncate name
+                 name = name.split(' ').slice(0, 8).join(' ') + "...";
+             }
+        }
+        return { name, description };
+    });
+
+    return { scenarios: scenarios, tokens: response.usageMetadata?.totalTokenCount || 0, rawText };
   }
 
-  async matchWorksToScenario(scenario: any, availableWorks: WorkItem[]): Promise<{ matches: any[], tokens: number }> {
+  async matchWorksToScenario(scenario: any, availableWorks: WorkItem[]): Promise<{ matches: any[], tokens: number, rawText: string }> {
     if (!this.ai) throw new Error("API Key not configured");
 
     const workList = availableWorks.map(w => ({ id: w.id, name: w.name, unit: w.unit }));
@@ -586,10 +623,11 @@ class LLMService {
       Output Format: JSON Array of objects with 'workId' and 'quantity'.
     `;
 
-    const response = await this.ai.models.generateContent({
+    const { rawText, response } = await this.safeGenerate({
         model: this.modelName,
         contents: prompt,
         config: {
+            systemInstruction: "You are a helpful estimator. Find matching works generously. Even weak matches are better than no matches. Output JSON.",
             responseMimeType: "application/json",
             maxOutputTokens: 2000,
             safetySettings: [
@@ -608,8 +646,10 @@ class LLMService {
         }
     });
     
-    const result = safeParseJSON(response.text);
-    return { matches: Array.isArray(result) ? result : [], tokens: response.usageMetadata?.totalTokenCount || 0 };
+    const result = safeParseJSON(rawText);
+    const matches = Array.isArray(result) ? result : [];
+    
+    return { matches, tokens: response.usageMetadata?.totalTokenCount || 0, rawText };
   }
 }
 
@@ -618,7 +658,7 @@ const llmService = new LLMService();
 // --- Hooks ---
 
 const useProgressSimulator = () => {
-  const intervalsRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const intervalsRef = useRef<Record<string, any>>({});
 
   const startProgress = useCallback((id: string, setState: React.Dispatch<React.SetStateAction<Record<string, LoadingState>>>, initialStep: string) => {
     // Set initial
@@ -725,7 +765,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"collision" | "cost" | "settings" | "logs">("collision");
   
   // "Database"
-  const [settings, setSettings] = useState<AppSettings>({ apiKey: process.env.API_KEY || "", model: "gemini-2.5-flash", language: "en" });
+  const [settings, setSettings] = useState<AppSettings>({ model: "gemini-2.5-flash", language: "en" });
   
   // Initialize from LocalStorage
   const [works, setWorks] = useState<WorkItem[]>(() => {
@@ -783,7 +823,7 @@ export default function App() {
 
   // Init LLM
   useEffect(() => {
-    llmService.init(settings.apiKey, settings.model);
+    llmService.init(process.env.API_KEY || "", settings.model);
   }, [settings]);
 
   // Persistence Effects
@@ -904,6 +944,7 @@ export default function App() {
           categoryId: targetRowId,
           name: rw.name || "Unknown Work",
           price: typeof rw.price === 'number' ? rw.price : 0,
+          currency: rw.currency || (settings.language === 'ru' ? '₽' : '$'),
           unit: rw.unit || "unit",
           source: urlInput,
           score: score,
@@ -1015,7 +1056,7 @@ export default function App() {
     try {
       const scenario = scenarios.find(s => s.id === selectedScenarioId)!;
       
-      const { matches, tokens } = await llmService.matchWorksToScenario(scenario, availableWorks);
+      const { matches, tokens, rawText } = await llmService.matchWorksToScenario(scenario, availableWorks);
       
       const scenarioWorks: ScenarioWork[] = matches.map((m: any) => {
         let qty = 1;
@@ -1033,7 +1074,7 @@ export default function App() {
       }).filter((sw: any) => sw.workId !== "");
 
       if (scenarioWorks.length === 0) {
-         addLog("Match Works", "error", `Scenario: '${scenario.name}'. LLM could not match any works from ${categoryCode}.`, tokens);
+         addLog("Match Works", "error", `Scenario: '${scenario.name}'. LLM could not match any works from ${categoryCode}.\n\nRaw Response:\n${rawText}`, tokens);
       } else {
          setScenarios(prev => prev.map(s => {
             if (s.id === selectedScenarioId) {
@@ -1114,13 +1155,13 @@ export default function App() {
     <div className="overflow-auto flex-1 bg-white border rounded shadow-sm relative">
       <div className="grid min-w-[1200px]" style={{ gridTemplateColumns: `200px repeat(${localizedDisciplines.length}, 1fr)` }}>
         {/* Header Row */}
-        <div className="sticky top-0 left-0 z-30 bg-gray-100 p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm">
+        <div className="sticky top-0 left-0 z-30 bg-gray-100 p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm h-24">
           {t('table.name')}
         </div>
         {localizedDisciplines.map(d => {
             const style = getDisciplineStyle(d);
             return (
-                <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm" style={{ backgroundColor: style.bg }}>
+                <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm h-24" style={{ backgroundColor: style.bg }}>
                     <span className="font-bold" style={{ color: style.text }}>{d.code}</span>
                     <span className="text-[10px] leading-tight mt-1 opacity-80 max-w-[90px] truncate" style={{ color: style.text }} title={d.name}>{d.name}</span>
                 </div>
@@ -1144,7 +1185,7 @@ export default function App() {
           <React.Fragment key={r.id}>
             {/* Row Label */}
             <div 
-              className={`sticky left-0 z-10 p-2 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors relative overflow-hidden min-h-[64px]
+              className={`sticky left-0 z-10 p-2 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors relative overflow-hidden h-24
                 ${isSelectedRow ? 'ring-inset ring-2 ring-blue-500' : ''}
                 ${isRowLoading ? 'shadow-[inset_0_0_10px_rgba(37,99,235,0.2)] border-l-4 border-l-blue-500' : ''}
                 `}
@@ -1176,10 +1217,10 @@ export default function App() {
                
                {/* Works Stats Badge - Unified and Fixed to prevent artifacts */}
                {totalWorks > 0 && !isRowLoading && (
-                  <div className="flex gap-1 mt-1.5 px-2 relative z-10 w-full overflow-hidden">
-                      <span className="text-[9px] bg-white/60 text-black px-1.5 py-0.5 rounded shadow-sm border border-black/5 whitespace-nowrap">{totalWorks}</span>
+                  <div className="absolute bottom-1 right-1 z-10 flex gap-1 bg-white/90 rounded px-1.5 py-0.5 border shadow-sm">
+                      <span className="text-[9px] text-black">{totalWorks}</span>
                       {acceptedWorks > 0 && (
-                          <span className="text-[9px] bg-green-100 text-green-800 px-1.5 py-0.5 rounded shadow-sm border border-green-200 whitespace-nowrap">✓ {acceptedWorks}</span>
+                          <span className="text-[9px] text-green-600 font-bold border-l border-gray-300 pl-1">✓ {acceptedWorks}</span>
                       )}
                   </div>
                )}
@@ -1201,7 +1242,7 @@ export default function App() {
                  const bgClass = symbol === 'Д' ? 'bg-red-50 text-red-700 font-bold' : 'text-gray-400 font-light';
                  
                  return (
-                   <div key={c.id} className={`border-b border-r border-gray-200 p-2 flex items-center justify-center ${bgClass} hover:bg-gray-50 transition-colors cursor-default`}>
+                   <div key={c.id} className={`border-b border-r border-gray-200 p-2 flex items-center justify-center ${bgClass} hover:bg-gray-50 transition-colors cursor-default h-24`}>
                      {symbol}
                    </div>
                  );
@@ -1212,12 +1253,15 @@ export default function App() {
                  // Check if any scenario in this cell is matching
                  const isMatching = scenarios.some(s => s.matrixKey === cellKey && loadingMatches[s.id]);
                  
-                 if (isDiagonal) return <div key={c.id} className="bg-gray-100 border-b border-r border-gray-200" />;
+                 // Determine currency symbol from first work or default
+                 const displayCurrency = getCurrencySymbol(settings.language);
+
+                 if (isDiagonal) return <div key={c.id} className="bg-gray-100 border-b border-r border-gray-200 h-24" />;
                  
                  return (
                    <div 
                     key={c.id} 
-                    className={`border-b border-r border-gray-200 p-2 flex flex-col items-center justify-center cursor-pointer transition-all h-16 relative overflow-hidden
+                    className={`border-b border-r border-gray-200 p-2 flex flex-col items-center justify-center cursor-pointer transition-all h-24 relative overflow-hidden
                         ${isSelected ? 'bg-blue-100 ring-inset ring-2 ring-blue-600 z-0' : 'hover:bg-gray-50'}
                         ${isCellLoading ? 'bg-blue-50' : ''}
                     `}
@@ -1236,7 +1280,7 @@ export default function App() {
                          <>
                             <div className="absolute bottom-0 left-0 h-1 bg-blue-500 transition-all duration-300 z-10" style={{ width: `${isCellLoading.progress}%` }}></div>
                             <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
-                            <span className="text-[9px] text-blue-600 font-medium animate-pulse">{isCellLoading.step}</span>
+                            <span className="text-[9px] text-blue-600 font-medium animate-pulse text-center leading-tight">{isCellLoading.step}</span>
                          </>
                      )}
                      
@@ -1247,7 +1291,7 @@ export default function App() {
 
                      {!isCellLoading && costData ? (
                         <>
-                           <span className="text-sm font-bold text-gray-800">${costData.min}-{costData.max}</span>
+                           <span className="text-sm font-bold text-gray-800">{displayCurrency}{costData.min}-{costData.max}</span>
                            <span className="text-[10px] text-gray-500 bg-white px-1 rounded border mt-1">{costData.count} var</span>
                         </>
                      ) : !isCellLoading ? (
@@ -1436,7 +1480,7 @@ export default function App() {
                                     {works.filter(w => w.categoryId === selectedRowId).map(w => (
                                         <tr key={w.id} className="hover:bg-gray-50 group">
                                             <td className="p-3">{w.name}</td>
-                                            <td className="p-3 font-mono">${w.price}</td>
+                                            <td className="p-3 font-mono">{w.currency || getCurrencySymbol(settings.language)}{w.price}</td>
                                             <td className="p-3 text-gray-500">{w.unit}</td>
                                             <td className="p-3 text-xs text-gray-400 truncate max-w-[100px]">{w.source}</td>
                                             <td className="p-3">
@@ -1550,7 +1594,7 @@ export default function App() {
                                                                 <div className="text-xs text-gray-500 truncate max-w-[200px]">{s.description}</div>
                                                             </td>
                                                             <td className="p-3 font-mono font-medium text-blue-700">
-                                                                ${calculateScenarioCost(s)}
+                                                                {getCurrencySymbol(settings.language)}{calculateScenarioCost(s)}
                                                             </td>
                                                             <td className="p-3">
                                                                 <button className="text-red-400 hover:text-red-600" onClick={(e) => {
@@ -1606,21 +1650,21 @@ export default function App() {
                                         </div>
 
                                         {/* Add Work Bar */}
-                                        <div className="p-2 border-b bg-gray-100 flex gap-2 items-center">
+                                        <div className="p-2 border-b bg-gray-100 flex flex-wrap gap-2 items-center">
                                             <select 
-                                                className="flex-1 bg-white text-gray-900 border border-gray-300 rounded px-2 py-2 text-xs focus:outline-none focus:border-blue-500"
+                                                className="flex-1 min-w-[150px] bg-white text-gray-900 border border-gray-300 rounded px-2 py-2 text-xs focus:outline-none focus:border-blue-500"
                                                 value={workToAddId}
                                                 onChange={(e) => setWorkToAddId(e.target.value)}
                                             >
                                                 <option value="">{t('addManual')}</option>
                                                 {availableWorksForScenario.map(w => (
-                                                    <option key={w.id} value={w.id}>{w.name} (${w.price}/{w.unit})</option>
+                                                    <option key={w.id} value={w.id}>{w.name} ({w.currency || getCurrencySymbol(settings.language)}{w.price}/{w.unit})</option>
                                                 ))}
                                             </select>
                                             <Button onClick={handleAddManualWork} disabled={!workToAddId} className="py-1.5">{t('btnAdd')}</Button>
-                                            <div className="w-px h-6 bg-gray-300 mx-1"></div>
+                                            <div className="w-px h-6 bg-gray-300 mx-1 hidden sm:block"></div>
                                             {/* Removed disabled={generalLoading} */}
-                                            <Button variant="secondary" className="text-xs px-2 py-1.5" onClick={handleMatchWorks} disabled={!!currentMatchLoading}>
+                                            <Button variant="secondary" className="text-xs px-2 py-1.5 whitespace-nowrap" onClick={handleMatchWorks} disabled={!!currentMatchLoading}>
                                                 {currentMatchLoading ? t('btnMatching') : t('btnAutoSuggest')}
                                             </Button>
                                         </div>
@@ -1649,7 +1693,7 @@ export default function App() {
                                                             />
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="text-sm font-medium truncate" title={w?.name}>{w?.name || "Unknown Work"}</div>
-                                                                <div className="text-xs text-gray-500">${w?.price} / {w?.unit}</div>
+                                                                <div className="text-xs text-gray-500">{w?.currency || getCurrencySymbol(settings.language)}{w?.price} / {w?.unit}</div>
                                                             </div>
                                                             <div className="flex items-center gap-1">
                                                                 <input 
@@ -1670,7 +1714,7 @@ export default function App() {
                                                                 />
                                                             </div>
                                                             <div className="w-16 text-right text-sm font-mono">
-                                                                ${((w?.price || 0) * sw.quantity).toFixed(0)}
+                                                                {w?.currency || getCurrencySymbol(settings.language)}{((w?.price || 0) * sw.quantity).toFixed(0)}
                                                             </div>
                                                             <button 
                                                                 onClick={() => handleRemoveWorkFromScenario(sw.workId)}
@@ -1709,16 +1753,6 @@ export default function App() {
                 <div className="bg-white border rounded shadow-sm p-6 space-y-6">
                     <h2 className="text-xl font-bold text-gray-800">{t('settingsTitle')}</h2>
                     <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">{t('apiKeyLabel')}</label>
-                            <Input 
-                                type="password" 
-                                value={settings.apiKey} 
-                                onChange={(e:any) => setSettings(s => ({...s, apiKey: e.target.value}))}
-                                placeholder="Enter Google GenAI API Key"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">{t('apiKeyHint')}</p>
-                        </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">{t('modelLabel')}</label>
                             <Input 
@@ -1766,12 +1800,25 @@ export default function App() {
                                     {works.length} works, {scenarios.length} scenarios loaded.
                                 </span>
                             </div>
+                            <div className="mt-4">
+                                <Button variant="danger" onClick={() => {
+                                    if(confirm("Are you sure you want to reset all data? This cannot be undone.")) {
+                                        setWorks([]);
+                                        setScenarios([]);
+                                        localStorage.removeItem("cmwc_works");
+                                        localStorage.removeItem("cmwc_scenarios");
+                                        addLog("Reset", "success", "All data cleared.");
+                                    }
+                                }}>
+                                    {t('btnReset')}
+                                </Button>
+                            </div>
                         </div>
                         <div className="pt-4 border-t">
                             <h3 className="font-medium mb-2">{t('systemStatus')}</h3>
                             <div className="flex gap-2">
                                 <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm">
-                                    <div className={`w-2 h-2 rounded-full ${settings.apiKey ? 'bg-green-500' : 'bg-red-500'}`}/>
+                                    <div className={`w-2 h-2 rounded-full ${process.env.API_KEY ? 'bg-green-500' : 'bg-red-500'}`}/>
                                     {t('apiConfigured')}
                                 </div>
                                 <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm">
@@ -1793,30 +1840,34 @@ export default function App() {
                     <span className="text-sm font-normal text-gray-500">{t('totalTokens')}: {logs.reduce((a,b) => a + b.tokensUsed, 0)}</span>
                 </div>
                 <div className="flex-1 overflow-auto">
-                    <table className="w-full text-sm text-left">
+                    <table className="w-full text-sm text-left table-fixed">
                         <thead className="bg-gray-50 text-gray-500 sticky top-0">
                             <tr>
-                                <th className="p-3">Time</th>
-                                <th className="p-3">Action</th>
-                                <th className="p-3">Status</th>
-                                <th className="p-3">Tokens</th>
+                                <th className="p-3 w-24">Time</th>
+                                <th className="p-3 w-32">Action</th>
+                                <th className="p-3 w-24">Status</th>
+                                <th className="p-3 w-24">Tokens</th>
                                 <th className="p-3">Details</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y">
                             {logs.map(log => (
                                 <tr key={log.id} className="hover:bg-gray-50">
-                                    <td className="p-3 text-gray-500 font-mono text-xs">
+                                    <td className="p-3 text-gray-500 font-mono text-xs align-top">
                                         {new Date(log.timestamp).toLocaleTimeString()}
                                     </td>
-                                    <td className="p-3 font-medium">{log.action}</td>
-                                    <td className="p-3">
+                                    <td className="p-3 font-medium align-top">{log.action}</td>
+                                    <td className="p-3 align-top">
                                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${log.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                             {log.status}
                                         </span>
                                     </td>
-                                    <td className="p-3 font-mono">{log.tokensUsed}</td>
-                                    <td className="p-3 text-gray-600">{log.details}</td>
+                                    <td className="p-3 font-mono align-top">{log.tokensUsed}</td>
+                                    <td className="p-3 text-gray-600 align-top">
+                                        <div className="whitespace-pre-wrap font-mono text-xs max-h-48 overflow-y-auto border rounded p-1 bg-gray-50">
+                                            {log.details}
+                                        </div>
+                                    </td>
                                 </tr>
                             ))}
                             {logs.length === 0 && (
