@@ -1093,10 +1093,20 @@ export default function App() {
     if (!confirm(t('bulkLoadConfirm'))) return;
 
     const discs = localizedDisciplines;
+    const startTime = Date.now();
+    addLog("Bulk Load", "success", `Starting Bulk Load Works for all ${discs.length} categories.`);
+    
     setBulkStatus({ active: true, type: 'load', total: discs.length, current: 0, label: t('steps.parsing') });
+
+    let successCount = 0;
+    let failCount = 0;
 
     for (let i = 0; i < discs.length; i++) {
         const d = discs[i];
+        
+        // Update visual selection to show progress
+        setSelectedRowId(d.id);
+        setPanelOpen(true);
         
         setBulkStatus({ 
             active: true,
@@ -1107,49 +1117,120 @@ export default function App() {
         });
 
         try {
-            // Using await ensures we finish one before starting the next
             await processLoadWorks(d.id);
+            successCount++;
         } catch (e) {
             console.error(`Bulk load error for ${d.code}`, e);
-            // We continue to the next one even if one fails
+            failCount++;
         }
+        
+        // Small delay to allow UI to render animations cleanly
+        await new Promise(r => setTimeout(r, 500));
     }
     
     setBulkStatus(null);
-    addLog("Bulk Load", "success", "Bulk loading process completed.");
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    addLog("Bulk Load", "success", `Bulk Load Completed in ${duration}s. Success: ${successCount}, Failed: ${failCount}.`);
   };
 
   const handleBulkGenerateAll = async () => {
     if (!settings.enableAutomation) return;
     if (!confirm(t('bulkGenConfirm'))) return;
 
+    const startTime = Date.now();
+    addLog("Bulk Generate", "success", "Starting Bulk Scenario Generation for all matrix cells.");
+    
+    let pendingCells = [];
     for (const r of localizedDisciplines) {
         for (const c of localizedDisciplines) {
              if (r.id === c.id) continue;
              const cellKey = `${r.id}:${c.id}`;
-             if (loadingCells[cellKey]) continue;
-             
              const hasScenarios = scenarios.some(s => s.matrixKey === cellKey);
-             if (hasScenarios) continue;
-
-             await processGenerateScenarios(r.id, c.id);
+             if (!hasScenarios) {
+                 pendingCells.push({r, c});
+             }
         }
     }
+
+    setBulkStatus({ active: true, type: 'gen', total: pendingCells.length, current: 0, label: t('steps.generating') });
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < pendingCells.length; i++) {
+        const { r, c } = pendingCells[i];
+        
+        // Visual feedback
+        setSelectedCell({ r: r.id, c: c.id });
+        setPanelOpen(true);
+
+        setBulkStatus({ 
+            active: true,
+            type: 'gen',
+            total: pendingCells.length, 
+            current: i + 1, 
+            label: `${t('btnThinking')} ${r.code}:${c.code}...` 
+        });
+
+        try {
+             await processGenerateScenarios(r.id, c.id);
+             successCount++;
+        } catch (e) {
+             failCount++;
+        }
+        await new Promise(r => setTimeout(r, 200));
+    }
+
+    setBulkStatus(null);
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    addLog("Bulk Generate", "success", `Bulk Generation Completed in ${duration}s. Generated for ${successCount} cells. Failed: ${failCount}.`);
   };
 
   const handleBulkMatchAll = async () => {
      if (!settings.enableAutomation) return;
      if (!confirm(t('bulkMatchConfirm'))) return;
-
+    
+     const startTime = Date.now();
      const emptyScenarios = scenarios.filter(s => s.works.length === 0);
-     
-     for (const s of emptyScenarios) {
-         const [rId] = s.matrixKey.split(':');
-         const availableWorks = works.filter(w => w.categoryId === rId);
-         if (availableWorks.length === 0) continue;
+     addLog("Bulk Match", "success", `Starting Bulk Matching for ${emptyScenarios.length} scenarios.`);
+
+     setBulkStatus({ active: true, type: 'match', total: emptyScenarios.length, current: 0, label: t('steps.matching') });
+
+     let successCount = 0;
+     let failCount = 0;
+
+     for (let i = 0; i < emptyScenarios.length; i++) {
+         const s = emptyScenarios[i];
+         const [rId, cId] = s.matrixKey.split(':');
          
-         await processMatchWorks(s.id, availableWorks);
+         // Visual feedback
+         setSelectedCell({ r: rId, c: cId });
+         setSelectedScenarioId(s.id);
+         setPanelOpen(true);
+
+         setBulkStatus({ 
+            active: true,
+            type: 'match',
+            total: emptyScenarios.length, 
+            current: i + 1, 
+            label: `${t('btnMatching')} ${s.name.substring(0, 15)}...` 
+         });
+
+         const availableWorks = works.filter(w => w.categoryId === rId);
+         if (availableWorks.length > 0) {
+            try {
+                await processMatchWorks(s.id, availableWorks);
+                successCount++;
+            } catch (e) {
+                failCount++;
+            }
+         }
+         await new Promise(r => setTimeout(r, 200));
      }
+     
+     setBulkStatus(null);
+     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+     addLog("Bulk Match", "success", `Bulk Matching Completed in ${duration}s. Matched: ${successCount}. Failed: ${failCount}.`);
   };
 
   const handleAcceptWorks = () => {
@@ -1431,13 +1512,27 @@ export default function App() {
              {settings.enableAutomation && (
                 <>
                     <div className="h-4 w-px bg-gray-300 mx-2"></div>
-                    <div className="flex gap-2">
-                        <Button variant="secondary" onClick={handleBulkGenerateAll} title={t('automationHint')}>
-                            {t('btnBulkGen')}
-                        </Button>
-                        <Button variant="secondary" onClick={handleBulkMatchAll} title={t('automationHint')}>
-                            {t('btnBulkMatch')}
-                        </Button>
+                    <div className="flex gap-2 items-center">
+                        {bulkStatus && (bulkStatus.type === 'gen' || bulkStatus.type === 'match') ? (
+                             <div className="flex items-center gap-2 flex-1 max-w-xs bg-gray-100 rounded px-3 py-1 border border-blue-200">
+                                <div className="text-xs font-bold text-blue-700 whitespace-nowrap min-w-[60px]">
+                                    {Math.round((bulkStatus.current / bulkStatus.total) * 100)}% ({bulkStatus.current}/{bulkStatus.total})
+                                </div>
+                                <div className="flex-1 h-2 bg-gray-300 rounded-full overflow-hidden w-24">
+                                     <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(bulkStatus.current / bulkStatus.total) * 100}%`}}></div>
+                                </div>
+                                <span className="text-[10px] text-gray-500 truncate max-w-[100px]" title={bulkStatus.label}>{bulkStatus.label}</span>
+                            </div>
+                        ) : (
+                           <>
+                                <Button variant="secondary" onClick={handleBulkGenerateAll} title={t('automationHint')}>
+                                    {t('btnBulkGen')}
+                                </Button>
+                                <Button variant="secondary" onClick={handleBulkMatchAll} title={t('automationHint')}>
+                                    {t('btnBulkMatch')}
+                                </Button>
+                           </>
+                        )}
                     </div>
                 </>
              )}
