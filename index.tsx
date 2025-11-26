@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { GoogleGenAI, Type, Schema, HarmCategory, HarmBlockThreshold } from "@google/genai";
@@ -19,7 +18,7 @@ interface WorkItem {
   categoryId: string;
   name: string;
   price: number;
-  currency?: string; // Added currency field
+  currency?: string;
   unit: string;
   source: string;
   score: number; // 0 to 1
@@ -52,6 +51,8 @@ interface LogEntry {
 interface AppSettings {
   model: string;
   language: "en" | "ru";
+  apiUrl: string;
+  apiKey: string;
 }
 
 interface LoadingState {
@@ -106,8 +107,9 @@ const TRANSLATIONS = {
     selectScenario: "Select a scenario to view and edit details",
     settingsTitle: "Settings",
     apiKeyLabel: "API Key",
-    apiKeyHint: "Stored in app state (reset on refresh).",
+    apiKeyHint: "Leave empty to use the default environment key.",
     modelLabel: "Model",
+    apiUrlLabel: "API Endpoint URL",
     languageLabel: "Language",
     dataMgmt: "Data Management (Persistence)",
     dataMgmtHint: "Data is automatically saved to your browser's LocalStorage. To save to a file (e.g., for GitHub repo sync), export the database as JSON.",
@@ -125,7 +127,7 @@ const TRANSLATIONS = {
         classifying: "Classifying...",
         analyzing: "Generating scenarios from LLM...",
         finalizing: "Finalizing...",
-        generating: "Generating Scenarios...",
+        generating: "Generating scenarios...",
         matching: "Matching Works..."
     },
     disciplines: {
@@ -213,8 +215,9 @@ const TRANSLATIONS = {
     selectScenario: "Выберите сценарий для просмотра и редактирования",
     settingsTitle: "Настройки",
     apiKeyLabel: "API Ключ",
-    apiKeyHint: "Хранится в состоянии приложения (сбрасывается при обновлении).",
+    apiKeyHint: "Оставьте пустым, чтобы использовать системный ключ по умолчанию.",
     modelLabel: "Модель",
+    apiUrlLabel: "URL точки входа API",
     languageLabel: "Язык",
     dataMgmt: "Управление данными",
     dataMgmtHint: "Данные автоматически сохраняются в LocalStorage браузера. Для сохранения в файл (например, для Git) экспортируйте БД в JSON.",
@@ -300,16 +303,13 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 
 const cleanJson = (text: string | undefined) => {
   if (!text) return "{}";
-  // Remove markdown code blocks and whitespace
   let cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
   
-  // Robustly find start of JSON
   const firstBrace = cleaned.indexOf('{');
   const firstBracket = cleaned.indexOf('[');
   
   let start = 0;
   if (firstBrace === -1 && firstBracket === -1) {
-      // No JSON found
       return "{}";
   } else if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
       start = firstBrace;
@@ -325,41 +325,24 @@ const safeParseJSON = (text: string) => {
   try {
     return JSON.parse(cleaned);
   } catch (e) {
-    // Attempt to recover truncated JSON (specifically arrays)
     if (cleaned.trim().startsWith('[') && !cleaned.trim().endsWith(']')) {
          try {
-             // Find the last valid closing object brace '}'
              const lastCloseObj = cleaned.lastIndexOf('}');
              if (lastCloseObj > 0) {
-                 // Close the array manually
                  const salvaged = cleaned.substring(0, lastCloseObj + 1) + ']';
                  console.warn("Recovered truncated JSON array.");
                  return JSON.parse(salvaged);
              }
-         } catch (e2) {
-             // Recovery failed
-         }
+         } catch (e2) {}
     }
-    
-    console.warn("JSON Parse Failed (Cleaned):", cleaned.substring(0, 100) + "...");
     return null;
   }
 };
 
 const getDisciplineStyle = (d: Discipline) => {
-  // CONFIGURATION: Discipline Color Mapping
-  // All colors are now lighter pastels for better UI consistency
-  
-  if (d.code.startsWith("ВК")) {
-    // Pastel Blue for Water/Drainage
-    return { bg: "#e0f2fe", text: "#0369a1" }; // sky-100, sky-700
-  }
-  if (d.code.startsWith("ОВ")) {
-    // Pastel Orange for HVAC
-    return { bg: "#ffedd5", text: "#c2410c" }; // orange-100, orange-700
-  }
+  if (d.code.startsWith("ВК")) return { bg: "#e0f2fe", text: "#0369a1" };
+  if (d.code.startsWith("ОВ")) return { bg: "#ffedd5", text: "#c2410c" };
 
-  // Fallback to Rank defaults
   switch(d.rank) {
     case 1: return { bg: "var(--rank-1)", text: "var(--rank-1-text)" };
     case 2: return { bg: "var(--rank-2)", text: "var(--rank-2-text)" };
@@ -373,25 +356,35 @@ const getDisciplineStyle = (d: Discipline) => {
 
 const getCurrencySymbol = (lang: string) => lang === 'ru' ? '₽' : '$';
 
+const getDisplayCurrency = (w: WorkItem | Partial<WorkItem> | undefined, lang: string) => {
+  const defaultSymbol = getCurrencySymbol(lang);
+  if (!w || !w.currency) return defaultSymbol;
+  const c = w.currency.toUpperCase().trim();
+  if (['RUB', 'RUR', 'РУБ', '₽', 'USD', 'DOLLAR', '$'].includes(c)) return defaultSymbol;
+  return w.currency;
+};
+
 // --- LLM Service ---
 
 class LLMService {
-  private ai: GoogleGenAI | null = null;
+  private ai: GoogleGenAI;
   private modelName: string = "gemini-2.5-flash";
 
-  init(apiKey: string, model: string) {
-    if (apiKey) {
-      this.ai = new GoogleGenAI({ apiKey });
-      this.modelName = model || "gemini-2.5-flash";
-    }
+  constructor() {
+    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  }
+
+  updateConfig(settings: AppSettings) {
+      this.modelName = settings.model || "gemini-2.5-flash";
+      const key = settings.apiKey || process.env.API_KEY;
+      this.ai = new GoogleGenAI({ apiKey: key });
   }
 
   private async safeGenerate(params: any): Promise<{ rawText: string, response: any, status: number }> {
       try {
-          const response = await this.ai!.models.generateContent(params);
+          const response = await this.ai.models.generateContent(params);
           let rawText = response.text || "";
           
-          // Check if text is empty but candidate info exists (Refusal/Safety)
           if (!rawText && response.candidates && response.candidates.length > 0) {
               const candidate = response.candidates[0];
               if (candidate.finishReason && candidate.finishReason !== 'STOP') {
@@ -404,16 +397,13 @@ class LLMService {
 
           return { rawText, response, status: 200 };
       } catch (e: any) {
-          // Capture API Status Code if available
           const status = e.status || e.response?.status || e.statusCode || 500;
           throw new Error(`API Error [Status: ${status}]: ${e.message}`);
       }
   }
 
   async parseWorks(url: string, targetDiscipline: {code: string, name: string, description: string, keywords: string}, lang: 'en' | 'ru'): Promise<{ works: any[], tokens: number, status: number }> {
-    if (!this.ai) throw new Error("API Key not configured");
-    
-    const langPrompt = lang === 'ru' ? "Output ONLY in Russian language. Default currency to 'RUB' (₽)." : "Output ONLY in English language. Default currency to 'USD' ($).";
+    const langPrompt = lang === 'ru' ? "Output ONLY in Russian language. Default currency to 'RUB' (₽) if ambiguous." : "Output ONLY in English language. Default currency to 'USD' ($).";
     
     const prompt = `
       Act as a construction cost estimator. 
@@ -426,7 +416,7 @@ class LLMService {
       Keywords: ${targetDiscipline.keywords}
       
       IMPORTANT: 
-      1. Prioritize works that match the Keywords (e.g. if keywords mention "concrete", find concrete works).
+      1. Prioritize works that match the Keywords.
       2. If specific works are not found, include general construction works.
       3. Do NOT include the full HTML.
       4. Return ONLY valid JSON.
@@ -481,8 +471,6 @@ class LLMService {
   }
 
   async classifyWorks(works: any[], categoryId: string, disciplineDesc: string, keywords: string): Promise<{ classified: any[], tokens: number, status: number }> {
-    if (!this.ai) throw new Error("API Key not configured");
-
     const prompt = `
       You are an expert construction engineer specializing in BIM and collision resolution.
       
@@ -493,10 +481,9 @@ class LLMService {
       Key Related Terms: ${keywords}
       
       Scoring Rules:
-      1. High Score (0.8 - 1.0): Work explicitly mentions materials or methods specific to this category (e.g. "Concrete drilling" for Monolith/KR, "Pipe cutting" for Pipes). 
-         Note: For KR (Constructive), works involving "Concrete", "Diamond Drilling", "Cutting openings" are Critical and should be scored HIGH.
+      1. High Score (0.8 - 1.0): Work explicitly mentions materials or methods specific to this category (e.g. "Concrete drilling" for Monolith/KR). 
       2. Medium Score (0.5 - 0.7): General construction works plausible for this category.
-      3. Low Score (0.0 - 0.2): Unrelated works (e.g. Painting for Pipes, Flooring for Ceiling).
+      3. Low Score (0.0 - 0.2): Unrelated works.
       
       Works Input: ${JSON.stringify(works.map(w => w.name))}
       
@@ -529,8 +516,6 @@ class LLMService {
   }
 
   async generateScenarios(rowDisc: {code: string, name: string}, colDisc: {code: string, name: string}, lang: 'en' | 'ru'): Promise<{ scenarios: any[], tokens: number, rawText: string, status: number }> {
-    if (!this.ai) throw new Error("API Key not configured");
-
     const langPrompt = lang === 'ru' ? "Output strictly in Russian language." : "Output strictly in English language.";
 
     const prompt = `
@@ -608,8 +593,6 @@ class LLMService {
   }
 
   async matchWorksToScenario(scenario: any, availableWorks: WorkItem[]): Promise<{ matches: any[], tokens: number, rawText: string, status: number }> {
-    if (!this.ai) throw new Error("API Key not configured");
-
     const workList = availableWorks.map(w => ({ id: w.id, name: w.name, unit: w.unit }));
     const prompt = `
       Role: Construction Cost Estimator.
@@ -622,8 +605,8 @@ class LLMService {
       
       Instructions:
       1. Select ALL works that seem relevant to the scenario description.
-      2. If an exact match isn't found, pick the closest functional equivalent (e.g. if "Drilling" is needed, pick "Diamond Drilling" or "Hole cutting").
-      3. Be generous in selection to ensure the cost is captured.
+      2. If an exact match isn't found, pick the closest functional equivalent.
+      3. Be generous in selection.
       4. Return an empty array ONLY if absolutely no works are relevant.
       
       Output Format: JSON Array of objects with 'workId' and 'quantity'.
@@ -763,7 +746,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"collision" | "cost" | "settings" | "logs">("collision");
   
   // "Database"
-  const [settings, setSettings] = useState<AppSettings>({ model: "gemini-2.5-flash", language: "en" });
+  const [settings, setSettings] = useState<AppSettings>({ 
+    model: "gemini-2.5-flash", 
+    language: "en",
+    apiUrl: "https://generativelanguage.googleapis.com",
+    apiKey: "" 
+  });
   
   const [works, setWorks] = useState<WorkItem[]>(() => {
     try {
@@ -814,7 +802,7 @@ export default function App() {
   }, [settings.language, t]);
 
   useEffect(() => {
-    llmService.init(process.env.API_KEY || "", settings.model);
+    llmService.updateConfig(settings);
   }, [settings]);
 
   useEffect(() => {
@@ -924,7 +912,7 @@ export default function App() {
           categoryId: targetRowId,
           name: rw.name || "Unknown Work",
           price: typeof rw.price === 'number' ? rw.price : 0,
-          currency: rw.currency || (settings.language === 'ru' ? '₽' : '$'),
+          currency: ['RUB', 'RUR', 'РУБ', '₽', 'USD', 'DOLLAR', '$'].includes((rw.currency || '').toUpperCase()) ? undefined : rw.currency,
           unit: rw.unit || "unit",
           source: urlInput,
           score: score,
@@ -1262,8 +1250,8 @@ export default function App() {
           ))}
         </div>
         <div className="flex items-center gap-3">
-          <h1 className="font-semibold text-lg text-gray-800">{t('appTitle')}</h1>
           <div className="bg-blue-600 text-white p-1.5 rounded font-bold font-mono">CMWC</div>
+          <h1 className="font-semibold text-lg text-gray-800">{t('appTitle')}</h1>
         </div>
       </div>
 
@@ -1361,7 +1349,7 @@ export default function App() {
                                     {works.filter(w => w.categoryId === selectedRowId).map(w => (
                                         <tr key={w.id} className="hover:bg-gray-50 group">
                                             <td className="p-3">{w.name}</td>
-                                            <td className="p-3 font-mono">{w.currency || getCurrencySymbol(settings.language)}{w.price}</td>
+                                            <td className="p-3 font-mono">{getDisplayCurrency(w, settings.language)}{w.price}</td>
                                             <td className="p-3 text-gray-500">{w.unit}</td>
                                             <td className="p-3 text-xs text-gray-400 truncate max-w-[100px]">{w.source}</td>
                                             <td className="p-3"><div className="flex items-center gap-2"><div className="w-16 h-1.5 bg-gray-200 rounded overflow-hidden"><div className={`h-full ${w.score > 0.7 ? 'bg-green-500' : 'bg-yellow-500'}`} style={{width: `${w.score * 100}%`}}/></div><span className="text-xs">{w.score.toFixed(2)}</span></div></td>
@@ -1449,7 +1437,7 @@ export default function App() {
                                         <div className="p-2 border-b bg-gray-100 flex flex-wrap gap-2 items-center">
                                             <select className="flex-1 min-w-[150px] bg-white text-gray-900 border border-gray-300 rounded px-2 py-2 text-xs focus:outline-none focus:border-blue-500" value={workToAddId} onChange={(e) => setWorkToAddId(e.target.value)}>
                                                 <option value="">{t('addManual')}</option>
-                                                {availableWorksForScenario.map(w => <option key={w.id} value={w.id}>{w.name} ({w.currency || getCurrencySymbol(settings.language)}{w.price}/{w.unit})</option>)}
+                                                {availableWorksForScenario.map(w => <option key={w.id} value={w.id}>{w.name} ({getDisplayCurrency(w, settings.language)}{w.price}/{w.unit})</option>)}
                                             </select>
                                             <Button onClick={handleAddManualWork} disabled={!workToAddId} className="py-1.5">{t('btnAdd')}</Button>
                                             <div className="w-px h-6 bg-gray-300 mx-1 hidden sm:block"></div>
@@ -1462,9 +1450,9 @@ export default function App() {
                                                     return (
                                                         <div key={sw.workId} className="flex items-center gap-2 p-2 border rounded bg-gray-50">
                                                             <input type="checkbox" checked={sw.active} onChange={() => { setScenarios(prev => prev.map(s => { if(s.id === activeScenario.id) { const newWorks = [...s.works]; newWorks[idx] = {...newWorks[idx], active: !newWorks[idx].active}; return {...s, works: newWorks}; } return s; })) }} className="h-4 w-4 text-blue-600 rounded" />
-                                                            <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate" title={w?.name}>{w?.name || "Unknown Work"}</div><div className="text-xs text-gray-500">{w?.currency || getCurrencySymbol(settings.language)}{w?.price} / {w?.unit}</div></div>
+                                                            <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate" title={w?.name}>{w?.name || "Unknown Work"}</div><div className="text-xs text-gray-500">{getDisplayCurrency(w, settings.language)}{w?.price} / {w?.unit}</div></div>
                                                             <div className="flex items-center gap-1"><input type="number" className="w-16 text-right bg-white text-gray-900 border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500" value={sw.quantity} onChange={(e) => { const val = parseFloat(e.target.value); setScenarios(prev => prev.map(s => { if(s.id === activeScenario.id) { const newWorks = [...s.works]; newWorks[idx] = {...newWorks[idx], quantity: val}; return {...s, works: newWorks}; } return s; })) }} /></div>
-                                                            <div className="w-16 text-right text-sm font-mono">{w?.currency || getCurrencySymbol(settings.language)}{((w?.price || 0) * sw.quantity).toFixed(0)}</div>
+                                                            <div className="w-16 text-right text-sm font-mono">{getDisplayCurrency(w, settings.language)}{((w?.price || 0) * sw.quantity).toFixed(0)}</div>
                                                             <button onClick={() => handleRemoveWorkFromScenario(sw.workId)} className="text-gray-400 hover:text-red-500 p-1" title="Remove work">✕</button>
                                                         </div>
                                                     )
@@ -1488,6 +1476,20 @@ export default function App() {
                 <div className="bg-white border rounded shadow-sm p-6 space-y-6">
                     <h2 className="text-xl font-bold text-gray-800">{t('settingsTitle')}</h2>
                     <div className="space-y-4">
+                        <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('apiUrlLabel')}</label><Input value={settings.apiUrl} onChange={(e:any) => setSettings(s => ({...s, apiUrl: e.target.value}))}/></div>
+                        
+                        {/* RESTORED API KEY INPUT */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">{t('apiKeyLabel')}</label>
+                            <Input 
+                                type="password" 
+                                placeholder={process.env.API_KEY ? "Using System Key (Default)" : "Enter API Key"}
+                                value={settings.apiKey} 
+                                onChange={(e:any) => setSettings(s => ({...s, apiKey: e.target.value}))}
+                            />
+                            <p className="text-xs text-gray-500 mt-1">{t('apiKeyHint')}</p>
+                        </div>
+
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('modelLabel')}</label><Input value={settings.model} onChange={(e:any) => setSettings(s => ({...s, model: e.target.value}))}/></div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">{t('languageLabel')}</label>
@@ -1509,7 +1511,7 @@ export default function App() {
                         <div className="pt-4 border-t">
                             <h3 className="font-medium mb-2">{t('systemStatus')}</h3>
                             <div className="flex gap-2">
-                                <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm"><div className={`w-2 h-2 rounded-full ${process.env.API_KEY ? 'bg-green-500' : 'bg-red-500'}`}/>{t('apiConfigured')}</div>
+                                <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm"><div className={`w-2 h-2 rounded-full ${process.env.API_KEY || settings.apiKey ? 'bg-green-500' : 'bg-red-500'}`}/>{t('apiConfigured')}</div>
                                 <div className="flex items-center gap-2 px-3 py-1 rounded bg-gray-100 text-sm"><div className="w-2 h-2 rounded-full bg-blue-500"/>{t('storageActive')}</div>
                             </div>
                         </div>
