@@ -53,11 +53,20 @@ interface AppSettings {
   language: "en" | "ru";
   apiUrl: string;
   apiKey: string;
+  enableAutomation: boolean;
 }
 
 interface LoadingState {
     step: string;
     progress: number;
+}
+
+interface BulkStatus {
+    active: boolean;
+    type: 'load' | 'gen' | 'match';
+    total: number;
+    current: number;
+    label: string;
 }
 
 // --- Constants & Translations ---
@@ -122,6 +131,14 @@ const TRANSLATIONS = {
     logsTitle: "Request Logs",
     totalTokens: "Total Tokens",
     noLogs: "No logs yet.",
+    automationLabel: "Enable Full Automation",
+    automationHint: "Enables bulk operations buttons. Use with caution (consumes many tokens).",
+    btnBulkLoad: "Load All (Auto)",
+    btnBulkGen: "Generate All Scenarios (Auto)",
+    btnBulkMatch: "Match All Scenarios (Auto)",
+    bulkLoadConfirm: "This will iterate through ALL categories and load works. It may consume a lot of tokens and time. Continue?",
+    bulkGenConfirm: "This will generate scenarios for ALL matrix cells. Continue?",
+    bulkMatchConfirm: "This will attempt to match works for ALL scenarios that have no works assigned. Continue?",
     steps: {
         parsing: "Parsing Page...",
         classifying: "Classifying...",
@@ -230,6 +247,14 @@ const TRANSLATIONS = {
     logsTitle: "Логи запросов",
     totalTokens: "Всего токенов",
     noLogs: "Логов пока нет.",
+    automationLabel: "Включить полную автоматизацию",
+    automationHint: "Разрешает кнопки массовых операций. Осторожно: большой расход токенов.",
+    btnBulkLoad: "Загрузить всё (Авто)",
+    btnBulkGen: "Сгенер. всё (Авто)",
+    btnBulkMatch: "Подбор всех (Авто)",
+    bulkLoadConfirm: "Это запустит загрузку работ для ВСЕХ категорий по очереди. Это может занять время и потратить много токенов. Продолжить?",
+    bulkGenConfirm: "Это запустит генерацию сценариев для ВСЕХ ячеек матрицы. Продолжить?",
+    bulkMatchConfirm: "Это запустит подбор работ для ВСЕХ сценариев, где работы еще не назначены. Продолжить?",
     steps: {
         parsing: "Парсинг страницы...",
         classifying: "Классификация...",
@@ -380,26 +405,42 @@ class LLMService {
       this.ai = new GoogleGenAI({ apiKey: key });
   }
 
-  private async safeGenerate(params: any): Promise<{ rawText: string, response: any, status: number }> {
-      try {
-          const response = await this.ai.models.generateContent(params);
-          let rawText = response.text || "";
-          
-          if (!rawText && response.candidates && response.candidates.length > 0) {
-              const candidate = response.candidates[0];
-              if (candidate.finishReason && candidate.finishReason !== 'STOP') {
-                  rawText = `[No Text Generated. FinishReason: ${candidate.finishReason}]`;
-                  if (candidate.safetyRatings) {
-                      rawText += `\nSafety Ratings: ${JSON.stringify(candidate.safetyRatings)}`;
-                  }
-              }
-          }
+  private async safeGenerate(params: any, retries = 3): Promise<{ rawText: string, response: any, status: number }> {
+      let lastError;
+      for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+            const response = await this.ai.models.generateContent(params);
+            let rawText = response.text || "";
+            
+            if (!rawText && response.candidates && response.candidates.length > 0) {
+                const candidate = response.candidates[0];
+                if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+                    // Try to extract text even if stopped for other reasons
+                    if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0 && candidate.content.parts[0].text) {
+                        rawText = candidate.content.parts[0].text;
+                    } else {
+                        // If completely empty, treat as retry-able error if possible, but finishReason might indicate blockage
+                        throw new Error(`Generation stopped: ${candidate.finishReason}`);
+                    }
+                }
+            }
+            if (!rawText) throw new Error("Empty response from LLM");
 
-          return { rawText, response, status: 200 };
-      } catch (e: any) {
-          const status = e.status || e.response?.status || e.statusCode || 500;
-          throw new Error(`API Error [Status: ${status}]: ${e.message}`);
+            return { rawText, response, status: 200 };
+        } catch (e: any) {
+            lastError = e;
+            // Retry logic
+            const status = e.status || e.response?.status || e.statusCode;
+            const isRetryable = status === 429 || status >= 500 || e.message.includes("Empty response") || e.message.includes("Generation stopped");
+            
+            if (!isRetryable && attempt === 0) throw e; 
+            if (attempt === retries - 1) throw e;
+            
+            // Exponential backoff: 1s, 2s, 4s
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
+        }
       }
+      throw lastError || new Error("Failed to generate content after retries");
   }
 
   async parseWorks(url: string, targetDiscipline: {code: string, name: string, description: string, keywords: string}, lang: 'en' | 'ru'): Promise<{ works: any[], tokens: number, status: number }> {
@@ -699,7 +740,7 @@ const useProgressSimulator = () => {
 
 // --- Components ---
 
-const Button = ({ children, onClick, variant = "primary", disabled = false, className = "" }: any) => {
+const Button = ({ children, onClick, variant = "primary", disabled = false, className = "", title = "" }: any) => {
   const baseStyle = "px-4 py-2 rounded font-medium transition-colors text-sm flex items-center gap-2";
   const variants: any = {
     primary: "bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300",
@@ -714,6 +755,7 @@ const Button = ({ children, onClick, variant = "primary", disabled = false, clas
       onClick={onClick} 
       disabled={disabled}
       className={`${baseStyle} ${variants[variant]} ${className}`}
+      title={title}
     >
       {children}
     </button>
@@ -750,7 +792,8 @@ export default function App() {
     model: "gemini-2.5-flash", 
     language: "en",
     apiUrl: "https://generativelanguage.googleapis.com",
-    apiKey: "" 
+    apiKey: "",
+    enableAutomation: true
   });
   
   const [works, setWorks] = useState<WorkItem[]>(() => {
@@ -783,6 +826,7 @@ export default function App() {
   const [loadingRows, setLoadingRows] = useState<Record<string, LoadingState>>({});
   const [loadingCells, setLoadingCells] = useState<Record<string, LoadingState>>({});
   const [loadingMatches, setLoadingMatches] = useState<Record<string, LoadingState>>({});
+  const [bulkStatus, setBulkStatus] = useState<BulkStatus | null>(null);
   
   const { startProgress, updateStep, stopProgress } = useProgressSimulator();
 
@@ -858,15 +902,15 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleLoadWorks = async () => {
-    const targetRowId = selectedRowId; 
-    if (!urlInput || !targetRowId) return;
-    if (loadingRows[targetRowId]) return;
+  // --- Actions ---
 
-    const targetCategory = localizedDisciplines.find(d => d.id === targetRowId)!;
+  const processLoadWorks = async (targetRowId: string) => {
+    if (!urlInput || !targetRowId) return;
+    
+    const targetCategory = localizedDisciplines.find(d => d.id === targetRowId);
+    if (!targetCategory) return;
 
     startProgress(targetRowId, setLoadingRows, t('steps.parsing'));
-    setPanelOpen(true);
     let totalTokens = 0;
 
     try {
@@ -925,37 +969,20 @@ export default function App() {
 
     } catch (e: any) {
       addLog("Load Works", "error", `${targetCategory.code} (${targetCategory.name}): ${e.message}`, totalTokens);
-      setLoadingRows(prev => {
-         const newState = { ...prev };
-         delete newState[targetRowId];
-         return newState;
-      });
+      throw e; // Re-throw to be handled by caller if needed
     } finally {
       stopProgress(targetRowId, setLoadingRows);
     }
   };
 
-  const handleAcceptWorks = () => {
-    setWorks(prev => prev.map(w => {
-      if (w.categoryId === selectedRowId && w.status === "pending") {
-        if (w.score >= minScope) return { ...w, status: "accepted" };
-        else return { ...w, status: "rejected" };
-      }
-      return w;
-    }));
-  };
-
-  const handleGenScenarios = async () => {
-    if (!selectedCell) return;
-    const cellKey = `${selectedCell.r}:${selectedCell.c}`;
-    if (loadingCells[cellKey]) return;
-
+  const processGenerateScenarios = async (rId: string, cId: string) => {
+    const cellKey = `${rId}:${cId}`;
+    
     startProgress(cellKey, setLoadingCells, t('steps.analyzing'));
-    setPanelOpen(true);
 
     try {
-      const rDisc = localizedDisciplines.find(d => d.id === selectedCell.r)!;
-      const cDisc = localizedDisciplines.find(d => d.id === selectedCell.c)!;
+      const rDisc = localizedDisciplines.find(d => d.id === rId)!;
+      const cDisc = localizedDisciplines.find(d => d.id === cId)!;
       
       const { scenarios: genScenarios, tokens, status } = await llmService.generateScenarios(
           { code: rDisc.code, name: rDisc.name },
@@ -980,69 +1007,159 @@ export default function App() {
       setScenarios(prev => [...prev, ...newScenarios]);
       addLog("Generate Scenarios", "success", `[Status: ${status}] Row: ${rDisc.code} vs Col: ${cDisc.code}. Generated ${newScenarios.length} scenarios.`, tokens);
     } catch (e: any) {
-      const rDisc = localizedDisciplines.find(d => d.id === selectedCell.r);
-      const cDisc = localizedDisciplines.find(d => d.id === selectedCell.c);
+      const rDisc = localizedDisciplines.find(d => d.id === rId);
+      const cDisc = localizedDisciplines.find(d => d.id === cId);
       addLog("Generate Scenarios", "error", `Row: ${rDisc?.code} vs Col: ${cDisc?.code}. Error: ${e.message}`);
-      
-      setLoadingCells(prev => {
-         const newState = { ...prev };
-         delete newState[cellKey];
-         return newState;
-      });
     } finally {
       stopProgress(cellKey, setLoadingCells);
     }
   };
 
-  const handleMatchWorks = async () => {
-    if (!selectedScenarioId || !selectedCell) return;
-    
-    const availableWorks = works.filter(w => w.categoryId === selectedCell.r);
-    const categoryName = localizedDisciplines.find(d => d.id === selectedCell.r)?.name;
-    const categoryCode = localizedDisciplines.find(d => d.id === selectedCell.r)?.code;
+  const processMatchWorks = async (scenarioId: string, availableWorks: WorkItem[]) => {
+      const scenario = scenarios.find(s => s.id === scenarioId);
+      if (!scenario) return;
 
-    if (availableWorks.length === 0) {
-        addLog("Match Works", "error", `No works found for category '${categoryCode} ${categoryName}'. Please load works in Collision tab.`);
+      if (availableWorks.length === 0) {
+          addLog("Match Works", "error", `No works found for scenario ${scenario.name}.`);
+          return;
+      }
+
+      startProgress(scenarioId, setLoadingMatches, t('steps.matching'));
+
+      try {
+        const { matches, tokens, rawText, status } = await llmService.matchWorksToScenario(scenario, availableWorks);
+        
+        const scenarioWorks: ScenarioWork[] = matches.map((m: any) => {
+          let qty = 1;
+          if (m.quantity !== undefined && m.quantity !== null) {
+              const parsed = parseFloat(m.quantity);
+              if (!isNaN(parsed) && parsed > 0) qty = parsed;
+          }
+
+          return {
+              workId: availableWorks.find(w => w.id === m.workId || w.name === m.workId)?.id || "", 
+              quantity: qty, 
+              active: true
+          };
+        }).filter((sw: any) => sw.workId !== "");
+
+        if (scenarioWorks.length === 0) {
+           addLog("Match Works", "error", `[Status: ${status}] Scenario: '${scenario.name}'. LLM could not match any works.\n\nRaw Response:\n${rawText}`, tokens);
+        } else {
+           setScenarios(prev => prev.map(s => {
+              if (s.id === scenarioId) {
+              return { ...s, works: scenarioWorks };
+              }
+              return s;
+          }));
+          addLog("Match Works", "success", `[Status: ${status}] Scenario: '${scenario.name}'. Matched ${scenarioWorks.length} works.`, tokens);
+        }
+      } catch (e: any) {
+          addLog("Match Works", "error", `Scenario '${scenario.name}': ${e.message}`);
+      } finally {
+        stopProgress(scenarioId, setLoadingMatches);
+      }
+  };
+
+  const handleLoadWorks = () => {
+      if (selectedRowId) {
+          setPanelOpen(true);
+          processLoadWorks(selectedRowId);
+      }
+  };
+
+  const handleGenScenarios = () => {
+      if (selectedCell) {
+          setPanelOpen(true);
+          processGenerateScenarios(selectedCell.r, selectedCell.c);
+      }
+  };
+
+  const handleMatchWorks = () => {
+    if (!selectedScenarioId || !selectedCell) return;
+    const availableWorks = works.filter(w => w.categoryId === selectedCell.r);
+    processMatchWorks(selectedScenarioId, availableWorks);
+  };
+
+  // --- Bulk Handlers ---
+
+  const handleBulkLoadAll = async () => {
+    if (!settings.enableAutomation) return;
+    if (!urlInput) {
+        alert("Please enter a Pricing Source URL first.");
         return;
     }
+    
+    if (!confirm(t('bulkLoadConfirm'))) return;
 
-    startProgress(selectedScenarioId, setLoadingMatches, t('steps.matching'));
+    const discs = localizedDisciplines;
+    setBulkStatus({ active: true, type: 'load', total: discs.length, current: 0, label: t('steps.parsing') });
 
-    try {
-      const scenario = scenarios.find(s => s.id === selectedScenarioId)!;
-      
-      const { matches, tokens, rawText, status } = await llmService.matchWorksToScenario(scenario, availableWorks);
-      
-      const scenarioWorks: ScenarioWork[] = matches.map((m: any) => {
-        let qty = 1;
-        if (m.quantity !== undefined && m.quantity !== null) {
-            const parsed = parseFloat(m.quantity);
-            if (!isNaN(parsed) && parsed > 0) qty = parsed;
+    for (let i = 0; i < discs.length; i++) {
+        const d = discs[i];
+        
+        setBulkStatus({ 
+            active: true,
+            type: 'load',
+            total: discs.length, 
+            current: i + 1, 
+            label: `${t('btnLoading')} ${d.code}...` 
+        });
+
+        try {
+            // Using await ensures we finish one before starting the next
+            await processLoadWorks(d.id);
+        } catch (e) {
+            console.error(`Bulk load error for ${d.code}`, e);
+            // We continue to the next one even if one fails
         }
-
-        return {
-            workId: availableWorks.find(w => w.id === m.workId || w.name === m.workId)?.id || "", 
-            quantity: qty, 
-            active: true
-        };
-      }).filter((sw: any) => sw.workId !== "");
-
-      if (scenarioWorks.length === 0) {
-         addLog("Match Works", "error", `[Status: ${status}] Scenario: '${scenario.name}'. LLM could not match any works from ${categoryCode}.\n\nRaw Response:\n${rawText}`, tokens);
-      } else {
-         setScenarios(prev => prev.map(s => {
-            if (s.id === selectedScenarioId) {
-            return { ...s, works: scenarioWorks };
-            }
-            return s;
-        }));
-        addLog("Match Works", "success", `[Status: ${status}] Scenario: '${scenario.name}'. Matched ${scenarioWorks.length} works from ${categoryCode}.`, tokens);
-      }
-    } catch (e: any) {
-        addLog("Match Works", "error", e.message);
-    } finally {
-      stopProgress(selectedScenarioId, setLoadingMatches);
     }
+    
+    setBulkStatus(null);
+    addLog("Bulk Load", "success", "Bulk loading process completed.");
+  };
+
+  const handleBulkGenerateAll = async () => {
+    if (!settings.enableAutomation) return;
+    if (!confirm(t('bulkGenConfirm'))) return;
+
+    for (const r of localizedDisciplines) {
+        for (const c of localizedDisciplines) {
+             if (r.id === c.id) continue;
+             const cellKey = `${r.id}:${c.id}`;
+             if (loadingCells[cellKey]) continue;
+             
+             const hasScenarios = scenarios.some(s => s.matrixKey === cellKey);
+             if (hasScenarios) continue;
+
+             await processGenerateScenarios(r.id, c.id);
+        }
+    }
+  };
+
+  const handleBulkMatchAll = async () => {
+     if (!settings.enableAutomation) return;
+     if (!confirm(t('bulkMatchConfirm'))) return;
+
+     const emptyScenarios = scenarios.filter(s => s.works.length === 0);
+     
+     for (const s of emptyScenarios) {
+         const [rId] = s.matrixKey.split(':');
+         const availableWorks = works.filter(w => w.categoryId === rId);
+         if (availableWorks.length === 0) continue;
+         
+         await processMatchWorks(s.id, availableWorks);
+     }
+  };
+
+  const handleAcceptWorks = () => {
+    setWorks(prev => prev.map(w => {
+      if (w.categoryId === selectedRowId && w.status === "pending") {
+        if (w.score >= minScope) return { ...w, status: "accepted" };
+        else return { ...w, status: "rejected" };
+      }
+      return w;
+    }));
   };
 
   const handleAddManualWork = () => {
@@ -1268,6 +1385,24 @@ export default function App() {
                 <Button onClick={handleLoadWorks} disabled={!selectedRowId || !!currentRowLoading}>
                     {currentRowLoading ? `${t('btnLoading')} (${Math.round(currentRowLoading.progress)}%)...` : t('btnLoad')}
                 </Button>
+                
+                {bulkStatus && bulkStatus.type === 'load' ? (
+                    <div className="flex items-center gap-2 flex-1 max-w-xs bg-gray-100 rounded px-3 py-1 border border-blue-200">
+                        <div className="text-xs font-bold text-blue-700 whitespace-nowrap min-w-[60px]">
+                            {Math.round((bulkStatus.current / bulkStatus.total) * 100)}% ({bulkStatus.current}/{bulkStatus.total})
+                        </div>
+                        <div className="flex-1 h-2 bg-gray-300 rounded-full overflow-hidden">
+                             <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(bulkStatus.current / bulkStatus.total) * 100}%`}}></div>
+                        </div>
+                        <span className="text-[10px] text-gray-500 truncate max-w-[100px]" title={bulkStatus.label}>{bulkStatus.label}</span>
+                    </div>
+                ) : (
+                    settings.enableAutomation && (
+                        <Button variant="secondary" onClick={handleBulkLoadAll} title={t('automationHint')}>
+                            {t('btnBulkLoad')}
+                        </Button>
+                    )
+                )}
             </div>
             <div className="flex items-center gap-2 border-l pl-4">
                 <span className="text-gray-500 whitespace-nowrap">{t('minScope')}:</span>
@@ -1277,15 +1412,35 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === "cost" && selectedCell && (
+      {activeTab === "cost" && (
          <div className="bg-white border-b px-6 py-2 flex items-center gap-4 text-sm shadow-sm z-10">
-             <span className="font-medium text-gray-500">
-                {t('selected')}: <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.r)?.code}</span> vs <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.c)?.code}</span>
-             </span>
-             <div className="h-4 w-px bg-gray-300 mx-2"></div>
-             <Button onClick={handleGenScenarios} disabled={!!currentCellLoading}>
-                {currentCellLoading ? `${t('btnThinking')} (${currentCellLoading.step})...` : t('btnGenerate')}
-             </Button>
+             {selectedCell ? (
+                 <>
+                    <span className="font-medium text-gray-500">
+                        {t('selected')}: <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.r)?.code}</span> vs <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.c)?.code}</span>
+                    </span>
+                    <div className="h-4 w-px bg-gray-300 mx-2"></div>
+                    <Button onClick={handleGenScenarios} disabled={!!currentCellLoading}>
+                        {currentCellLoading ? `${t('btnThinking')} (${currentCellLoading.step})...` : t('btnGenerate')}
+                    </Button>
+                 </>
+             ) : (
+                 <span className="text-gray-400 italic">Select a cell to view details</span>
+             )}
+             
+             {settings.enableAutomation && (
+                <>
+                    <div className="h-4 w-px bg-gray-300 mx-2"></div>
+                    <div className="flex gap-2">
+                        <Button variant="secondary" onClick={handleBulkGenerateAll} title={t('automationHint')}>
+                            {t('btnBulkGen')}
+                        </Button>
+                        <Button variant="secondary" onClick={handleBulkMatchAll} title={t('automationHint')}>
+                            {t('btnBulkMatch')}
+                        </Button>
+                    </div>
+                </>
+             )}
          </div>
       )}
 
@@ -1478,7 +1633,6 @@ export default function App() {
                     <div className="space-y-4">
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('apiUrlLabel')}</label><Input value={settings.apiUrl} onChange={(e:any) => setSettings(s => ({...s, apiUrl: e.target.value}))}/></div>
                         
-                        {/* RESTORED API KEY INPUT */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">{t('apiKeyLabel')}</label>
                             <Input 
@@ -1491,6 +1645,7 @@ export default function App() {
                         </div>
 
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('modelLabel')}</label><Input value={settings.model} onChange={(e:any) => setSettings(s => ({...s, model: e.target.value}))}/></div>
+                        
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">{t('languageLabel')}</label>
                             <div className="flex bg-gray-100 rounded p-1 w-fit">
@@ -1498,6 +1653,21 @@ export default function App() {
                                 <button className={`px-4 py-1.5 rounded text-sm font-medium transition-all ${settings.language === 'ru' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`} onClick={() => setSettings(s => ({...s, language: 'ru'}))}>Русский</button>
                             </div>
                         </div>
+
+                        <div className="flex items-center gap-3 bg-blue-50 p-4 rounded border border-blue-100">
+                             <input 
+                                type="checkbox" 
+                                id="autoToggle"
+                                checked={settings.enableAutomation} 
+                                onChange={(e) => setSettings(s => ({...s, enableAutomation: e.target.checked}))}
+                                className="h-5 w-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                             />
+                             <div className="flex-1">
+                                <label htmlFor="autoToggle" className="block text-sm font-bold text-gray-800">{t('automationLabel')}</label>
+                                <p className="text-xs text-gray-600">{t('automationHint')}</p>
+                             </div>
+                        </div>
+
                         <div className="pt-4 border-t">
                             <h3 className="font-medium mb-2">{t('dataMgmt')}</h3>
                              <p className="text-sm text-gray-600 mb-4">{t('dataMgmtHint')}</p>
