@@ -394,18 +394,95 @@ const getDisplayCurrency = (w: WorkItem | Partial<WorkItem> | undefined, lang: s
 class LLMService {
   private ai: GoogleGenAI;
   private modelName: string = "gemini-2.5-flash";
+  private apiUrl: string = "";
+  private apiKey: string = "";
 
   constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Initialize with a placeholder if key is missing to prevent startup crash
+    this.apiKey = process.env.API_KEY || "PENDING";
+    this.ai = new GoogleGenAI({ apiKey: this.apiKey });
   }
 
   updateConfig(settings: AppSettings) {
       this.modelName = settings.model || "gemini-2.5-flash";
-      const key = settings.apiKey || process.env.API_KEY;
-      this.ai = new GoogleGenAI({ apiKey: key });
+      this.apiKey = settings.apiKey || process.env.API_KEY || "PENDING";
+      this.apiUrl = settings.apiUrl || "";
+      this.ai = new GoogleGenAI({ apiKey: this.apiKey });
+  }
+
+  private async generateOpenAICompatible(params: any, retries = 3): Promise<{ rawText: string, response: any, status: number }> {
+      const messages = [];
+      // Handle system instruction if present
+      if (params.config?.systemInstruction) {
+          messages.push({ role: "system", content: params.config.systemInstruction });
+      }
+      // Add user content
+      messages.push({ role: "user", content: params.contents });
+
+      const body: any = {
+          model: this.modelName,
+          messages: messages,
+          stream: false
+      };
+
+      // Handle JSON mode if requested
+      if (params.config?.responseMimeType === "application/json") {
+          body.response_format = { type: "json_object" };
+      }
+      
+      if (params.config?.maxOutputTokens) {
+          body.max_tokens = params.config.maxOutputTokens;
+      }
+
+      let lastError;
+      for (let attempt = 0; attempt < retries; attempt++) {
+          try {
+              const response = await fetch(this.apiUrl, {
+                  method: "POST",
+                  headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${this.apiKey}`
+                  },
+                  body: JSON.stringify(body)
+              });
+
+              if (!response.ok) {
+                  const errorText = await response.text();
+                  throw new Error(`API Error ${response.status}: ${errorText}`);
+              }
+
+              const data = await response.json();
+              const rawText = data.choices?.[0]?.message?.content || "";
+              
+              if (!rawText) throw new Error("Empty response from LLM");
+
+              return { rawText, response: data, status: response.status };
+
+          } catch (e: any) {
+             lastError = e;
+             const status = e.status || 500; 
+             const isRetryable = status === 429 || status >= 500 || (e.message && (e.message.includes("Empty response") || e.message.includes("Generation stopped")));
+            
+             if (!isRetryable && attempt === 0) throw e; 
+             if (attempt === retries - 1) throw e;
+             
+             await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
+          }
+      }
+      throw lastError || new Error("Failed to generate content after retries");
   }
 
   private async safeGenerate(params: any, retries = 3): Promise<{ rawText: string, response: any, status: number }> {
+      if (this.apiKey === "PENDING" || !this.apiKey) {
+           throw new Error("API Key is not set. Please configure it in Settings.");
+      }
+
+      // Check if custom API (Mistral/OpenAI) is configured
+      // We use custom logic if apiUrl is set and NOT pointing to googleapis.com
+      if (this.apiUrl && !this.apiUrl.includes("googleapis.com")) {
+          return this.generateOpenAICompatible(params, retries);
+      }
+
       let lastError;
       for (let attempt = 0; attempt < retries; attempt++) {
         try {
@@ -787,11 +864,20 @@ export default function App() {
   // --- State ---
   const [activeTab, setActiveTab] = useState<"collision" | "cost" | "settings" | "logs">("collision");
   
-  // "Database"
+  // "Database" google
+  // const [settings, setSettings] = useState<AppSettings>({ 
+  //   model: "gemini-2.5-flash", 
+  //   language: "en",
+  //   apiUrl: "https://generativelanguage.googleapis.com",
+  //   apiKey: "",
+  //   enableAutomation: true
+  // });
+
+  // "Database" mistral
   const [settings, setSettings] = useState<AppSettings>({ 
-    model: "gemini-2.5-flash", 
+    model: "mistral-large-latest", 
     language: "en",
-    apiUrl: "https://generativelanguage.googleapis.com",
+    apiUrl: "https://api.mistral.ai/v1/chat/completions",
     apiKey: "",
     enableAutomation: true
   });
