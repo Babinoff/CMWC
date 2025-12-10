@@ -1256,6 +1256,10 @@ export default function App() {
     
     let pendingCells = [];
     for (const r of localizedDisciplines) {
+        // Only process rows that have works loaded
+        const hasWorks = works.some(w => w.categoryId === r.id);
+        if (!hasWorks) continue;
+
         for (const c of localizedDisciplines) {
              if (r.id === c.id) continue;
              const cellKey = `${r.id}:${c.id}`;
