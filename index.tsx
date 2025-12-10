@@ -913,7 +913,10 @@ export default function App() {
   const [loadingCells, setLoadingCells] = useState<Record<string, LoadingState>>({});
   const [loadingMatches, setLoadingMatches] = useState<Record<string, LoadingState>>({});
   const [bulkStatus, setBulkStatus] = useState<BulkStatus | null>(null);
+  const [isStopping, setIsStopping] = useState(false);
   
+  const abortOperation = useRef(false);
+
   const { startProgress, updateStep, stopProgress } = useProgressSimulator();
 
   const t = useCallback((key: string) => {
@@ -1169,6 +1172,14 @@ export default function App() {
 
   // --- Bulk Handlers ---
 
+  const handleStopBulk = () => {
+      abortOperation.current = true;
+      setIsStopping(true);
+      if (bulkStatus) {
+          setBulkStatus(prev => prev ? ({ ...prev, label: "Stopping..." }) : null);
+      }
+  };
+
   const handleBulkLoadAll = async () => {
     if (!settings.enableAutomation) return;
     if (!urlInput) {
@@ -1178,6 +1189,8 @@ export default function App() {
     
     if (!confirm(t('bulkLoadConfirm'))) return;
 
+    abortOperation.current = false;
+    setIsStopping(false);
     const discs = localizedDisciplines;
     const startTime = Date.now();
     addLog("Bulk Load", "success", `Starting Bulk Load Works for all ${discs.length} categories.`);
@@ -1186,10 +1199,23 @@ export default function App() {
 
     let successCount = 0;
     let failCount = 0;
+    let skippedCount = 0;
 
     for (let i = 0; i < discs.length; i++) {
+        if (abortOperation.current) {
+            addLog("Bulk Load", "error", "Operation stopped by user.");
+            break;
+        }
+
         const d = discs[i];
         
+        // Skip if works already exist for this category
+        const existingWorks = works.filter(w => w.categoryId === d.id);
+        if (existingWorks.length > 0) {
+            skippedCount++;
+            continue;
+        }
+
         // Update visual selection to show progress
         setSelectedRowId(d.id);
         setPanelOpen(true);
@@ -1215,14 +1241,17 @@ export default function App() {
     }
     
     setBulkStatus(null);
+    setIsStopping(false);
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    addLog("Bulk Load", "success", `Bulk Load Completed in ${duration}s. Success: ${successCount}, Failed: ${failCount}.`);
+    addLog("Bulk Load", "success", `Bulk Load Completed in ${duration}s. Success: ${successCount}, Failed: ${failCount}, Skipped: ${skippedCount}.`);
   };
 
   const handleBulkGenerateAll = async () => {
     if (!settings.enableAutomation) return;
     if (!confirm(t('bulkGenConfirm'))) return;
 
+    abortOperation.current = false;
+    setIsStopping(false);
     const startTime = Date.now();
     addLog("Bulk Generate", "success", "Starting Bulk Scenario Generation for all matrix cells.");
     
@@ -1238,12 +1267,22 @@ export default function App() {
         }
     }
 
+    if (pendingCells.length === 0) {
+        addLog("Bulk Generate", "success", "No pending cells to generate.");
+        return;
+    }
+
     setBulkStatus({ active: true, type: 'gen', total: pendingCells.length, current: 0, label: t('steps.generating') });
 
     let successCount = 0;
     let failCount = 0;
 
     for (let i = 0; i < pendingCells.length; i++) {
+        if (abortOperation.current) {
+            addLog("Bulk Generate", "error", "Operation stopped by user.");
+            break;
+        }
+
         const { r, c } = pendingCells[i];
         
         // Visual feedback
@@ -1268,6 +1307,7 @@ export default function App() {
     }
 
     setBulkStatus(null);
+    setIsStopping(false);
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     addLog("Bulk Generate", "success", `Bulk Generation Completed in ${duration}s. Generated for ${successCount} cells. Failed: ${failCount}.`);
   };
@@ -1276,8 +1316,16 @@ export default function App() {
      if (!settings.enableAutomation) return;
      if (!confirm(t('bulkMatchConfirm'))) return;
     
+     abortOperation.current = false;
+     setIsStopping(false);
      const startTime = Date.now();
      const emptyScenarios = scenarios.filter(s => s.works.length === 0);
+     
+     if (emptyScenarios.length === 0) {
+         addLog("Bulk Match", "success", "No scenarios without works found.");
+         return;
+     }
+
      addLog("Bulk Match", "success", `Starting Bulk Matching for ${emptyScenarios.length} scenarios.`);
 
      setBulkStatus({ active: true, type: 'match', total: emptyScenarios.length, current: 0, label: t('steps.matching') });
@@ -1286,6 +1334,11 @@ export default function App() {
      let failCount = 0;
 
      for (let i = 0; i < emptyScenarios.length; i++) {
+         if (abortOperation.current) {
+             addLog("Bulk Match", "error", "Operation stopped by user.");
+             break;
+         }
+
          const s = emptyScenarios[i];
          const [rId, cId] = s.matrixKey.split(':');
          
@@ -1315,6 +1368,7 @@ export default function App() {
      }
      
      setBulkStatus(null);
+     setIsStopping(false);
      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
      addLog("Bulk Match", "success", `Bulk Matching Completed in ${duration}s. Matched: ${successCount}. Failed: ${failCount}.`);
   };
@@ -1562,6 +1616,15 @@ export default function App() {
                              <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(bulkStatus.current / bulkStatus.total) * 100}%`}}></div>
                         </div>
                         <span className="text-[10px] text-gray-500 truncate max-w-[100px]" title={bulkStatus.label}>{bulkStatus.label}</span>
+                        <Button 
+                            variant="danger" 
+                            className={`ml-1 !px-2 !py-0.5 !text-xs ${isStopping ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            onClick={handleStopBulk} 
+                            disabled={isStopping}
+                            title="Stop"
+                        >
+                            {isStopping ? 'Stopping...' : 'Stop'}
+                        </Button>
                     </div>
                 ) : (
                     settings.enableAutomation && (
@@ -1608,6 +1671,15 @@ export default function App() {
                                      <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(bulkStatus.current / bulkStatus.total) * 100}%`}}></div>
                                 </div>
                                 <span className="text-[10px] text-gray-500 truncate max-w-[100px]" title={bulkStatus.label}>{bulkStatus.label}</span>
+                                <Button 
+                                    variant="danger" 
+                                    className={`ml-1 !px-2 !py-0.5 !text-xs ${isStopping ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    onClick={handleStopBulk} 
+                                    disabled={isStopping}
+                                    title="Stop"
+                                >
+                                    {isStopping ? 'Stopping...' : 'Stop'}
+                                </Button>
                             </div>
                         ) : (
                            <>
