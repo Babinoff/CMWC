@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="public/heder.png" alt="CMWC Header" width="100%" />
+</div>
+
 # CMWC (Collision Matrix With Cost)
 
 https://babinoff.github.io/CMWC/
