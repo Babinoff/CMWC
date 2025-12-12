@@ -1415,7 +1415,7 @@ export default function App() {
     }));
   };
 
-  const calculateScenarioCost = (s: Scenario) => {
+  const calculateScenarioCost = useCallback((s: Scenario) => {
     return s.works.reduce((acc, sw) => {
       if (!sw.active) return acc;
       const w = works.find(wk => wk.id === sw.workId);
@@ -1423,7 +1423,17 @@ export default function App() {
       const qty = (typeof sw.quantity === 'number' && !isNaN(sw.quantity)) ? sw.quantity : 0;
       return acc + (price * qty);
     }, 0);
-  };
+  }, [works]);
+
+  const maxMatrixCost = useMemo(() => {
+    if (!scenarios.length) return 0;
+    let max = 0;
+    scenarios.forEach(s => {
+        const cost = calculateScenarioCost(s);
+        if (cost > max) max = cost;
+    });
+    return max;
+  }, [scenarios, calculateScenarioCost]);
 
   const getCellCostRange = (rId: string, cId: string) => {
     const cellScenarios = scenarios.filter(s => s.matrixKey === `${rId}:${cId}`);
@@ -1522,11 +1532,19 @@ export default function App() {
                  const isMatching = scenarios.some(s => s.matrixKey === cellKey && loadingMatches[s.id]);
                  const displayCurrency = getCurrencySymbol(settings.language);
 
+                 let cellStyle: React.CSSProperties = {};
+                 if (!isSelected && !isCellLoading && costData && maxMatrixCost > 0) {
+                    const ratio = Math.min(costData.max / maxMatrixCost, 1);
+                    // Purple heat map to avoid conflict with KR (Red) and other disciplines
+                    cellStyle = { backgroundColor: `rgba(147, 51, 234, ${ratio * 0.5})` };
+                 }
+
                  if (isDiagonal) return <div key={c.id} className="bg-gray-100 border-b border-r border-gray-200 h-24" />;
                  
                  return (
                    <div 
                     key={c.id} 
+                    style={cellStyle}
                     className={`border-b border-r border-gray-200 p-2 flex flex-col items-center justify-center cursor-pointer transition-all h-24 relative overflow-hidden
                         ${isSelected ? 'bg-blue-100 ring-inset ring-2 ring-blue-600 z-0' : 'hover:bg-gray-50'}
                         ${isCellLoading ? 'bg-blue-50' : ''}
