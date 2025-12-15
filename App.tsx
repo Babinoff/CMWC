@@ -388,6 +388,15 @@ const getDisplayCurrency = (w: WorkItem | Partial<WorkItem> | undefined, lang: s
   return w.currency;
 };
 
+const formatCompactNumber = (num: number) => {
+  if (num === 0) return "0";
+  if (!num) return "-";
+  return new Intl.NumberFormat('en-US', {
+    notation: "compact",
+    maximumFractionDigits: 1
+  }).format(num);
+};
+
 // --- LLM Service ---
 
 class LLMService {
@@ -1450,16 +1459,16 @@ export default function App() {
 
   const renderMatrix = (type: "collision" | "cost") => (
     <div className="overflow-auto flex-1 bg-white border rounded shadow-sm relative">
-      <div className="grid min-w-[1200px]" style={{ gridTemplateColumns: `200px repeat(${localizedDisciplines.length}, 1fr)` }}>
-        <div className="sticky top-0 left-0 z-30 bg-gray-100 p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm h-24">
+      <div className="grid min-w-[var(--matrix-min-width)]" style={{ gridTemplateColumns: `var(--matrix-first-col-width) repeat(${localizedDisciplines.length}, 1fr)` }}>
+        <div className="sticky top-0 left-0 z-30 bg-gray-100 p-2 md:p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-24">
           {t('table.name')}
         </div>
         {localizedDisciplines.map(d => {
             const style = getDisciplineStyle(d);
             return (
-                <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm h-24" style={{ backgroundColor: style.bg }}>
-                    <span className="font-bold" style={{ color: style.text }}>{d.code}</span>
-                    <span className="text-[10px] leading-tight mt-1 opacity-80 max-w-[90px] truncate" style={{ color: style.text }} title={d.name}>{d.name}</span>
+                <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-24" style={{ backgroundColor: style.bg }}>
+                    <span className="font-bold text-sm md:text-base" style={{ color: style.text }}>{d.code}</span>
+                    <span className="text-[10px] leading-tight mt-1 opacity-80 max-w-[90px] truncate hidden md:block" style={{ color: style.text }} title={d.name}>{d.name}</span>
                 </div>
             );
         })}
@@ -1475,7 +1484,7 @@ export default function App() {
           return (
           <React.Fragment key={r.id}>
             <div 
-              className={`sticky left-0 z-10 p-2 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors relative overflow-hidden h-24
+              className={`sticky left-0 z-10 p-2 font-bold text-sm border-b border-r border-gray-200 cursor-pointer hover:brightness-95 flex flex-col justify-center transition-colors relative overflow-hidden h-[var(--matrix-cell-height)]
                 ${isSelectedRow ? 'ring-inset ring-2 ring-blue-500' : ''}
                 ${isRowLoading ? 'shadow-[inset_0_0_10px_rgba(37,99,235,0.2)] border-l-4 border-l-blue-500' : ''}
                 `}
@@ -1494,13 +1503,13 @@ export default function App() {
                    <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
                )}
 
-               <div className="flex flex-col items-start px-2 w-full">
-                    <span style={{ color: style.text }} className="relative z-10">{r.code}</span>
-                    <span className="text-[10px] font-normal opacity-80 truncate max-w-full relative z-10" style={{ color: style.text }} title={r.name}>{r.name}</span>
+               <div className="flex flex-col items-start px-1 md:px-2 w-full">
+                    <span style={{ color: style.text }} className="relative z-10 text-sm md:text-base">{r.code}</span>
+                    <span className="text-[10px] font-normal opacity-80 truncate max-w-full relative z-10 hidden md:block" style={{ color: style.text }} title={r.name}>{r.name}</span>
                </div>
                
                {totalWorks > 0 && !isRowLoading && (
-                  <div className="absolute bottom-1 right-1 z-10 flex gap-1 bg-white/90 rounded px-1.5 py-0.5 border shadow-sm">
+                  <div className="absolute bottom-1 right-1 z-10 flex gap-1 bg-white/90 rounded px-1 md:px-1.5 py-0.5 border shadow-sm scale-75 md:scale-100 origin-bottom-right">
                       <span className="text-[9px] text-black">{totalWorks}</span>
                       {acceptedWorks > 0 && (
                           <span className="text-[9px] text-green-600 font-bold border-l border-gray-300 pl-1">✓ {acceptedWorks}</span>
@@ -1509,7 +1518,7 @@ export default function App() {
                )}
 
                {isRowLoading && isSelectedRow && (
-                   <span className="text-[9px] text-blue-700 bg-white/80 rounded px-1 mx-2 mt-1 relative z-10 w-fit">{isRowLoading.step} ({Math.round(isRowLoading.progress)}%)</span>
+                   <span className="text-[9px] text-blue-700 bg-white/80 rounded px-1 mx-2 mt-1 relative z-10 w-fit hidden md:block">{isRowLoading.step} ({Math.round(isRowLoading.progress)}%)</span>
                )}
             </div>
 
@@ -1522,8 +1531,8 @@ export default function App() {
                  const symbol = isDiagonal ? "Д" : "П";
                  const bgClass = symbol === 'Д' ? 'bg-red-50 text-red-700 font-bold' : 'text-gray-400 font-light';
                  return (
-                   <div key={c.id} className={`border-b border-r border-gray-200 p-2 flex items-center justify-center ${bgClass} hover:bg-gray-50 transition-colors cursor-default h-24`}>
-                     {symbol}
+                   <div key={c.id} className={`border-b border-r border-gray-200 p-2 flex items-center justify-center ${bgClass} hover:bg-gray-50 transition-colors cursor-default h-[var(--matrix-cell-height)]`}>
+                     <span className="text-sm md:text-base">{symbol}</span>
                    </div>
                  );
               } else {
@@ -1539,13 +1548,13 @@ export default function App() {
                     cellStyle = { backgroundColor: `rgba(147, 51, 234, ${ratio * 0.5})` };
                  }
 
-                 if (isDiagonal) return <div key={c.id} className="bg-gray-100 border-b border-r border-gray-200 h-24" />;
+                 if (isDiagonal) return <div key={c.id} className="bg-gray-100 border-b border-r border-gray-200 h-[var(--matrix-cell-height)]" />;
                  
                  return (
                    <div 
                     key={c.id} 
                     style={cellStyle}
-                    className={`border-b border-r border-gray-200 p-2 flex flex-col items-center justify-center cursor-pointer transition-all h-24 relative overflow-hidden
+                    className={`border-b border-r border-gray-200 p-1 md:p-2 flex flex-col items-center justify-center cursor-pointer transition-all h-[var(--matrix-cell-height)] relative overflow-hidden
                         ${isSelected ? 'bg-blue-100 ring-inset ring-2 ring-blue-600 z-0' : 'hover:bg-gray-50'}
                         ${isCellLoading ? 'bg-blue-50' : ''}
                     `}
@@ -1558,7 +1567,7 @@ export default function App() {
                          <>
                             <div className="absolute bottom-0 left-0 h-1 bg-blue-500 transition-all duration-300 z-10" style={{ width: `${isCellLoading.progress}%` }}></div>
                             <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
-                            <span className="text-[9px] text-blue-600 font-medium animate-pulse text-center leading-tight">{isCellLoading.step}</span>
+                            <span className="text-[9px] text-blue-600 font-medium animate-pulse text-center leading-tight hidden md:block">{isCellLoading.step}</span>
                          </>
                      )}
                      {!isCellLoading && isMatching && (
@@ -1566,10 +1575,13 @@ export default function App() {
                      )}
                      {!isCellLoading && costData ? (
                         <>
-                           <span className="text-sm font-bold text-gray-800">{displayCurrency}{costData.min}-{costData.max}</span>
-                           <span className="text-[10px] text-gray-500 bg-white px-1 rounded border mt-1">{costData.count} var</span>
+                           <span className="text-xs md:text-sm font-bold text-gray-800">{displayCurrency}{formatCompactNumber(costData.min)}</span>
+                           {costData.min !== costData.max && (
+                                <span className="text-[9px] md:text-xs text-gray-500 hidden md:block">-{formatCompactNumber(costData.max)}</span>
+                           )}
+                           <span className="text-[9px] md:text-[10px] text-gray-500 bg-white px-1 rounded border mt-0.5 md:mt-1 scale-90 md:scale-100">{costData.count} var</span>
                         </>
-                     ) : !isCellLoading ? <span className="text-lg text-gray-200 font-light">-</span> : null}
+                     ) : !isCellLoading ? <span className="text-sm md:text-lg text-gray-200 font-light">-</span> : null}
                    </div>
                  );
               }
@@ -1596,102 +1608,104 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg-app)]">
-      <div className="bg-white border-b border-[var(--border)] px-6 py-3 flex items-center justify-between shadow-sm z-20">
-        <div className="flex bg-gray-100 p-1 rounded-lg">
+      <div className="bg-white border-b border-[var(--border)] px-4 md:px-6 py-2 md:py-3 flex flex-row items-center justify-between gap-3 shadow-sm z-20">
+        <div className="flex bg-gray-100 p-1 rounded-lg flex-1 overflow-x-auto no-scrollbar">
           {(["collision", "cost", "settings", "logs"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`flex-none px-3 md:px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize whitespace-nowrap ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
             >
               {t(`tabs.${tab}`)}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600 text-white p-1.5 rounded font-bold font-mono">CMWC</div>
-          <h1 className="font-semibold text-lg text-gray-800">{t('appTitle')}</h1>
+        <div className="flex items-center gap-3 flex-none">
+          <div className="bg-blue-600 text-white p-1.5 rounded font-bold font-mono text-xs md:text-base">CMWC</div>
+          <h1 className="font-semibold text-lg text-gray-800 hidden md:block">{t('appTitle')}</h1>
         </div>
       </div>
 
       {activeTab === "collision" && (
-        <div className="bg-white border-b px-6 py-2 flex items-center gap-4 text-sm shadow-sm z-10">
-            <span className="font-medium text-gray-500 whitespace-nowrap">{t('collisionControls')}:</span>
-            <div className="flex-1 flex gap-2">
+        <div className="bg-white border-b px-2 md:px-6 py-2 md:py-3 flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-3 text-sm shadow-sm z-10">
+            <span className="font-medium text-gray-500 whitespace-nowrap hidden md:block">{t('collisionControls')}:</span>
+            <div className="flex-1 flex flex-col md:flex-row gap-1 md:gap-2">
                  <Input 
                     placeholder={t('placeholderUrl')}
                     value={urlInput} 
                     onChange={(e:any) => setUrlInput(e.target.value)}
-                    className="max-w-md"
+                    className="w-full md:max-w-md"
                 />
-                <Button onClick={handleLoadWorks} disabled={!selectedRowId || !!currentRowLoading}>
-                    {currentRowLoading ? `${t('btnLoading')} (${Math.round(currentRowLoading.progress)}%)...` : t('btnLoad')}
-                </Button>
-                
-                {bulkStatus && bulkStatus.type === 'load' ? (
-                    <div className="flex items-center gap-2 flex-1 max-w-xs bg-gray-100 rounded px-3 py-1 border border-blue-200">
-                        <div className="text-xs font-bold text-blue-700 whitespace-nowrap min-w-[60px]">
-                            {Math.round((bulkStatus.current / bulkStatus.total) * 100)}% ({bulkStatus.current}/{bulkStatus.total})
+                <div className="flex gap-1 md:gap-2">
+                    <Button onClick={handleLoadWorks} disabled={!selectedRowId || !!currentRowLoading} className="flex-1 md:flex-none justify-center">
+                        {currentRowLoading ? `${t('btnLoading')}...` : t('btnLoad')}
+                    </Button>
+                    
+                    {bulkStatus && bulkStatus.type === 'load' ? (
+                        <div className="flex items-center gap-2 flex-1 max-w-xs bg-gray-100 rounded px-3 py-1 border border-blue-200">
+                            <div className="text-xs font-bold text-blue-700 whitespace-nowrap min-w-[60px]">
+                                {Math.round((bulkStatus.current / bulkStatus.total) * 100)}%
+                            </div>
+                            <div className="flex-1 h-2 bg-gray-300 rounded-full overflow-hidden hidden sm:block">
+                                <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(bulkStatus.current / bulkStatus.total) * 100}%`}}></div>
+                            </div>
+                            <Button 
+                                variant="danger" 
+                                className={`ml-1 !px-2 !py-0.5 !text-xs ${isStopping ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                onClick={handleStopBulk} 
+                                disabled={isStopping}
+                                title="Stop"
+                            >
+                                Stop
+                            </Button>
                         </div>
-                        <div className="flex-1 h-2 bg-gray-300 rounded-full overflow-hidden">
-                             <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(bulkStatus.current / bulkStatus.total) * 100}%`}}></div>
-                        </div>
-                        <span className="text-[10px] text-gray-500 truncate max-w-[100px]" title={bulkStatus.label}>{bulkStatus.label}</span>
-                        <Button 
-                            variant="danger" 
-                            className={`ml-1 !px-2 !py-0.5 !text-xs ${isStopping ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            onClick={handleStopBulk} 
-                            disabled={isStopping}
-                            title="Stop"
-                        >
-                            {isStopping ? 'Stopping...' : 'Stop'}
-                        </Button>
-                    </div>
-                ) : (
-                    settings.enableAutomation && (
-                        <Button variant="secondary" onClick={handleBulkLoadAll} title={t('automationHint')}>
-                            {t('btnBulkLoad')}
-                        </Button>
-                    )
-                )}
+                    ) : (
+                        settings.enableAutomation && (
+                            <Button variant="secondary" onClick={handleBulkLoadAll} title={t('automationHint')} className="flex-1 md:flex-none justify-center">
+                                {t('btnBulkLoad')}
+                            </Button>
+                        )
+                    )}
+                </div>
             </div>
-            <div className="flex items-center gap-2 border-l pl-4">
-                <span className="text-gray-500 whitespace-nowrap">{t('minScope')}:</span>
-                <input type="number" step="0.1" min="0" max="1" value={minScope} onChange={(e) => setMinScope(parseFloat(e.target.value))} className="w-16 bg-white text-gray-900 border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500" />
+            <div className="flex items-center justify-between md:justify-start gap-2 border-t md:border-t-0 md:border-l pt-2 md:pt-0 md:pl-4">
+                <div className="flex items-center gap-2">
+                    <span className="text-gray-500 whitespace-nowrap">{t('minScope')}:</span>
+                    <input type="number" step="0.1" min="0" max="1" value={minScope} onChange={(e) => setMinScope(parseFloat(e.target.value))} className="w-16 bg-white text-gray-900 border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500" />
+                </div>
                 <Button variant="secondary" onClick={handleAcceptWorks} disabled={!selectedRowId}>{t('btnAutoAccept')}</Button>
             </div>
         </div>
       )}
 
       {activeTab === "cost" && (
-         <div className="bg-white border-b px-6 py-2 flex items-center gap-4 text-sm shadow-sm z-10">
+         <div className="bg-white border-b px-4 md:px-6 py-2 flex flex-col md:flex-row items-stretch md:items-center gap-3 text-sm shadow-sm z-10">
              {selectedCell ? (
-                 <>
+                 <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
                     <span className="font-medium text-gray-500">
                         {t('selected')}: <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.r)?.code}</span> vs <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.c)?.code}</span>
                     </span>
-                    <div className="h-4 w-px bg-gray-300 mx-2"></div>
-                    <Button onClick={handleGenScenarios} disabled={!!currentCellLoading}>
-                        {currentCellLoading ? `${t('btnThinking')} (${currentCellLoading.step})...` : t('btnGenerate')}
+                    <div className="hidden md:block h-4 w-px bg-gray-300 mx-2"></div>
+                    <Button onClick={handleGenScenarios} disabled={!!currentCellLoading} className="w-full md:w-auto justify-center">
+                        {currentCellLoading ? `${t('btnThinking')}...` : t('btnGenerate')}
                     </Button>
-                 </>
+                 </div>
              ) : (
-                 <span className="text-gray-400 italic">Select a cell to view details</span>
+                 <span className="text-gray-400 italic py-2">Select a cell to view details</span>
              )}
              
              {settings.enableAutomation && (
                 <>
-                    <div className="h-4 w-px bg-gray-300 mx-2"></div>
-                    <div className="flex gap-2 items-center">
+                    <div className="hidden md:block h-4 w-px bg-gray-300 mx-2"></div>
+                    <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-center border-t md:border-t-0 pt-2 md:pt-0">
                         {bulkStatus && (bulkStatus.type === 'gen' || bulkStatus.type === 'match') ? (
                              <div className="flex items-center gap-2 flex-1 max-w-xs bg-gray-100 rounded px-3 py-1 border border-blue-200">
                                 <div className="text-xs font-bold text-blue-700 whitespace-nowrap min-w-[60px]">
-                                    {Math.round((bulkStatus.current / bulkStatus.total) * 100)}% ({bulkStatus.current}/{bulkStatus.total})
+                                    {Math.round((bulkStatus.current / bulkStatus.total) * 100)}%
                                 </div>
-                                <div className="flex-1 h-2 bg-gray-300 rounded-full overflow-hidden w-24">
+                                <div className="flex-1 h-2 bg-gray-300 rounded-full overflow-hidden w-24 hidden sm:block">
                                      <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(bulkStatus.current / bulkStatus.total) * 100}%`}}></div>
                                 </div>
-                                <span className="text-[10px] text-gray-500 truncate max-w-[100px]" title={bulkStatus.label}>{bulkStatus.label}</span>
                                 <Button 
                                     variant="danger" 
                                     className={`ml-1 !px-2 !py-0.5 !text-xs ${isStopping ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1699,18 +1713,18 @@ export default function App() {
                                     disabled={isStopping}
                                     title="Stop"
                                 >
-                                    {isStopping ? 'Stopping...' : 'Stop'}
+                                    Stop
                                 </Button>
                             </div>
                         ) : (
-                           <>
-                                <Button variant="secondary" onClick={handleBulkGenerateAll} title={t('automationHint')}>
+                           <div className="flex gap-2">
+                                <Button variant="secondary" onClick={handleBulkGenerateAll} title={t('automationHint')} className="flex-1 md:flex-none justify-center">
                                     {t('btnBulkGen')}
                                 </Button>
-                                <Button variant="secondary" onClick={handleBulkMatchAll} title={t('automationHint')}>
+                                <Button variant="secondary" onClick={handleBulkMatchAll} title={t('automationHint')} className="flex-1 md:flex-none justify-center">
                                     {t('btnBulkMatch')}
                                 </Button>
-                           </>
+                           </div>
                         )}
                     </div>
                 </>
@@ -1816,8 +1830,8 @@ export default function App() {
                                 <div className="flex items-center gap-2 text-blue-600 text-sm font-medium"><span>{t('showPanel')}</span><ToggleButton open={false} onClick={() => setPanelOpen(true)} /></div>
                             </div>
                         )}
-                        <div className={`flex gap-4 transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden'}`}>
-                            <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
+                        <div className={`flex flex-col md:flex-row gap-4 transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden'}`}>
+                            <div className="w-full md:w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
                                 {currentCellLoading ? (
                                     <div className="absolute inset-0 bg-white z-20 flex flex-col items-center justify-center">
                                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
@@ -1850,7 +1864,7 @@ export default function App() {
                                     </>
                                 )}
                             </div>
-                            <div className="w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
+                            <div className="w-full md:w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
                                 {activeScenario ? (
                                     <>
                                         {currentMatchLoading && (
@@ -1901,8 +1915,9 @@ export default function App() {
         )}
 
         {activeTab === "settings" && (
-            <div className="max-w-2xl mx-auto w-full mt-10">
-                <div className="bg-white border rounded shadow-sm p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto w-full bg-[var(--bg-app)]">
+                <div className="max-w-2xl mx-auto w-full my-4 md:my-10 px-4">
+                    <div className="bg-white border rounded shadow-sm p-4 md:p-6 space-y-6">
                     <h2 className="text-xl font-bold text-gray-800">{t('settingsTitle')}</h2>
                     <div className="space-y-4">
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">{t('apiUrlLabel')}</label><Input value={settings.apiUrl} onChange={(e:any) => setSettings(s => ({...s, apiUrl: e.target.value}))}/></div>
@@ -1961,6 +1976,7 @@ export default function App() {
                         </div>
                     </div>
                 </div>
+            </div>
             </div>
         )}
 

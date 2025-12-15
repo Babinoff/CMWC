@@ -30,6 +30,21 @@
         --rank-4: #f3f4f6; --rank-4-text: #374151;
         --rank-5: #dbeafe; --rank-5-text: #1e40af;
         --rank-6: #dcfce7; --rank-6-text: #166534;
+
+        /* Matrix Dimensions Mobile Default */
+        --matrix-first-col-width: 50px;
+        --matrix-cell-height: 50px;
+        --matrix-min-width: 350px;
+        --matrix-header-height: 36px;
+      }
+
+      @media (min-width: 768px) {
+        :root {
+          --matrix-first-col-width: 200px;
+          --matrix-cell-height: 96px; /* h-24 */
+          --matrix-min-width: 1200px;
+          --matrix-header-height: auto;
+        }
       }
 
       body, html {
