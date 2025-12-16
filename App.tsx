@@ -123,6 +123,8 @@ const TRANSLATIONS = {
     dataMgmtHint: "Data is automatically saved to your browser's LocalStorage. To save to a file (e.g., for GitHub repo sync), export the database as JSON.",
     btnExport: "Download DB (.json)",
     btnImport: "Import DB (.json)",
+    btnLoadDemo: "Load Demo Data",
+    demoLoaded: "Demo data loaded successfully!",
     btnReset: "Reset / Clear Data",
     systemStatus: "System Status",
     apiConfigured: "API Configured",
@@ -998,6 +1000,26 @@ export default function App() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleLoadDemo = async () => {
+    if (works.length > 0 && !confirm("This will overwrite existing works. Continue?")) return;
+    
+    try {
+        const module = await import('./example/cmwc_data.json');
+        const data = module.default; // Vite/Webpack handles JSON imports this way
+        
+        if (data) {
+            if (Array.isArray(data.works)) setWorks(data.works);
+            if (Array.isArray(data.scenarios)) setScenarios(data.scenarios);
+            addLog("Load Demo", "success", t('demoLoaded'));
+            alert(t('demoLoaded'));
+        }
+    } catch (e: any) {
+        console.error("Failed to load demo data", e);
+        addLog("Load Demo", "error", `Failed to load demo data: ${e.message}`);
+        alert("Failed to load demo data. See console/logs.");
+    }
   };
 
   // --- Actions ---
@@ -1986,6 +2008,7 @@ export default function App() {
                             <div className="flex gap-3 items-center">
                                 <Button variant="secondary" onClick={handleExportData}>{t('btnExport')}</Button>
                                 <div className="relative"><input type="file" accept=".json" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleImportData} /><Button variant="secondary">{t('btnImport')}</Button></div>
+                                <Button variant="primary" onClick={handleLoadDemo}>{t('btnLoadDemo')}</Button>
                                 <span className="text-xs text-gray-500">{works.length} works, {scenarios.length} scenarios loaded.</span>
                             </div>
                             <div className="mt-4"><Button variant="danger" onClick={() => { if(confirm("Are you sure you want to reset all data? This cannot be undone.")) { setWorks([]); setScenarios([]); localStorage.removeItem("cmwc_works"); localStorage.removeItem("cmwc_scenarios"); addLog("Reset", "success", "All data cleared."); } }}>{t('btnReset')}</Button></div>
