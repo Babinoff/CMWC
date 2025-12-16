@@ -915,6 +915,7 @@ export default function App() {
   const [minScope, setMinScope] = useState(0.7);
   const [workToAddId, setWorkToAddId] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
+  const [isMobileExpanded, setIsMobileExpanded] = useState(false);
   
   // Loading States
   const [loadingRows, setLoadingRows] = useState<Record<string, LoadingState>>({});
@@ -1575,11 +1576,11 @@ export default function App() {
                      )}
                      {!isCellLoading && costData ? (
                         <>
-                           <span className="text-xs md:text-sm font-bold text-gray-800">{displayCurrency}{formatCompactNumber(costData.min)}</span>
+                           <span className="text-[10px] md:text-sm font-bold text-gray-800">{displayCurrency}{formatCompactNumber(costData.min)}</span>
                            {costData.min !== costData.max && (
-                                <span className="text-[9px] md:text-xs text-gray-500 hidden md:block">-{formatCompactNumber(costData.max)}</span>
+                                <span className="text-[8px] md:text-xs text-gray-500 hidden md:block">-{formatCompactNumber(costData.max)}</span>
                            )}
-                           <span className="text-[9px] md:text-[10px] text-gray-500 bg-white px-1 rounded border mt-0.5 md:mt-1 scale-90 md:scale-100">{costData.count} var</span>
+                           <span className="text-[8px] md:text-[10px] text-gray-500 bg-white px-1 rounded border mt-0.5 md:mt-1 scale-90 md:scale-100">{costData.count} var</span>
                         </>
                      ) : !isCellLoading ? <span className="text-sm md:text-lg text-gray-200 font-light">-</span> : null}
                    </div>
@@ -1755,10 +1756,20 @@ export default function App() {
                              <div className="flex items-center gap-2 text-blue-600 text-sm font-medium"><span>{t('showPanel')}</span><ToggleButton open={false} onClick={() => setPanelOpen(true)} /></div>
                          </div>
                     )}
-                    <div className={`bg-white border rounded shadow-lg flex flex-col transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden border-0'}`}>
+                    <div className={`bg-white border rounded shadow-lg flex flex-col transition-all duration-300 ease-in-out 
+                        ${panelOpen ? (isMobileExpanded ? 'fixed inset-0 z-50 h-full' : 'h-1/2 opacity-100') : 'h-0 opacity-0 overflow-hidden border-0'}
+                        ${isMobileExpanded ? 'md:relative md:h-1/2 md:inset-auto md:z-auto' : ''}
+                    `}>
                         <div className="p-3 border-b bg-gray-50 flex justify-between items-center relative">
                              {currentRowLoading && <div className="absolute bottom-0 left-0 h-1 bg-blue-500 transition-all duration-300 z-20" style={{ width: `${currentRowLoading.progress}%` }}></div>}
                             <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+                                <button 
+                                    className="md:hidden p-1 text-gray-500 hover:text-blue-600 border rounded bg-white shadow-sm mr-2"
+                                    onClick={(e) => { e.stopPropagation(); setIsMobileExpanded(!isMobileExpanded); }}
+                                    title={isMobileExpanded ? "Collapse" : "Expand"}
+                                >
+                                    {isMobileExpanded ? "▼" : "▲"}
+                                </button>
                                 {t('worksPanel')}: {localizedDisciplines.find(d => d.id === selectedRowId)?.code} - {localizedDisciplines.find(d => d.id === selectedRowId)?.name}
                                 {currentRowLoading && <span className="text-xs font-normal text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{currentRowLoading.step}</span>}
                             </h3>
@@ -1830,7 +1841,10 @@ export default function App() {
                                 <div className="flex items-center gap-2 text-blue-600 text-sm font-medium"><span>{t('showPanel')}</span><ToggleButton open={false} onClick={() => setPanelOpen(true)} /></div>
                             </div>
                         )}
-                        <div className={`flex flex-col md:flex-row gap-4 transition-all duration-300 ease-in-out ${panelOpen ? 'h-1/2 opacity-100' : 'h-0 opacity-0 overflow-hidden'}`}>
+                        <div className={`flex flex-col md:flex-row gap-4 transition-all duration-300 ease-in-out 
+                            ${panelOpen ? (isMobileExpanded ? 'fixed inset-0 z-50 h-full bg-white p-2' : 'h-1/2 opacity-100') : 'h-0 opacity-0 overflow-hidden'}
+                            ${isMobileExpanded ? 'md:relative md:h-1/2 md:inset-auto md:z-auto md:bg-transparent md:p-0' : ''}
+                        `}>
                             <div className="w-full md:w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
                                 {currentCellLoading ? (
                                     <div className="absolute inset-0 bg-white z-20 flex flex-col items-center justify-center">
@@ -1841,7 +1855,16 @@ export default function App() {
                                 ) : (
                                     <>
                                         <div className="p-3 border-b bg-gray-50 font-semibold text-gray-700 flex justify-between items-center">
-                                            <span>{t('scenarios')}</span>
+                                            <div className="flex items-center gap-2">
+                                                <button 
+                                                    className="md:hidden p-1 text-gray-500 hover:text-blue-600 border rounded bg-white shadow-sm"
+                                                    onClick={(e) => { e.stopPropagation(); setIsMobileExpanded(!isMobileExpanded); }}
+                                                    title={isMobileExpanded ? "Collapse" : "Expand"}
+                                                >
+                                                    {isMobileExpanded ? "▼" : "▲"}
+                                                </button>
+                                                <span>{t('scenarios')}</span>
+                                            </div>
                                             <div className="flex items-center gap-1 text-gray-500 hover:text-gray-800 cursor-pointer" onClick={() => setPanelOpen(false)}>
                                                 <span className="text-xs font-medium uppercase">{t('hide')}</span><ToggleButton open={panelOpen} onClick={() => setPanelOpen(false)} />
                                             </div>
