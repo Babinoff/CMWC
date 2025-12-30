@@ -53,6 +53,14 @@ interface AppSettings {
   apiUrl: string;
   apiKey: string;
   enableAutomation: boolean;
+  parsingSites: ParsingSite[];
+}
+
+interface ParsingSite {
+  id: string;
+  url: string;
+  categories: string;
+  description: string;
 }
 
 interface LoadingState {
@@ -321,6 +329,16 @@ const DISCIPLINES: Discipline[] = [
   { id: "AUPT_PIPE", code: "АУПТ", rank: 5, nameKey: "AUPT_PIPE_NAME", descKey: "AUPT_PIPE_DESC", keywordsKey: "AUPT_PIPE_KW" },
   { id: "AUPT_SPR", code: "АУПТ", rank: 5, nameKey: "AUPT_SPR_NAME", descKey: "AUPT_SPR_DESC", keywordsKey: "AUPT_SPR_KW" },
   { id: "EOM", code: "ЭО, ЭС, ЭМ, СС", rank: 6, nameKey: "EOM_NAME", descKey: "EOM_DESC", keywordsKey: "EOM_KW" },
+];
+
+const DEFAULT_PARSING_SITES: ParsingSite[] = [
+  { id: "site_1", url: "https://garantstroikompleks.ru/prajs-list", categories: "Общестрой", description: "Полный прайс-лист на ремонтно-строительные работы" },
+  { id: "site_2", url: "https://stroyremdizayn.ru/almaznaya-rezka-betona", categories: "КР (Бетон)", description: "Алмазная резка бетона, стен и перекрытий" },
+  { id: "site_3", url: "https://stroyremdizayn.ru/uslugi/santekhnika-vodosnabzhenie-i-kanalizaciya", categories: "ВК (Вода/Канализация)", description: "Услуги сантехника, водоснабжение и канализация" },
+  { id: "site_4", url: "https://stroyremdizayn.ru/demontazh-sten-i-peregorodok", categories: "Демонтаж", description: "Демонтаж стен и перегородок" },
+  { id: "site_5", url: "https://stroyremdizayn.ru/uslugi/elektromontazhnye-raboty-na-kommercheskih-obektah", categories: "ЭОМ (Электрика)", description: "Электромонтажные работы на коммерческих объектах" },
+  { id: "site_6", url: "https://remelit.ru/remont-kvartir-tsena/", categories: "Ремонт квартир", description: "Цены на ремонт квартир в Москве и области" },
+  { id: "site_7", url: "https://kronotech.ru/stroitelnye-raboty/montazh-inzhenernyh-sistem", categories: "Инженерные системы", description: "Монтаж инженерных систем" },
 ];
 
 // --- Helpers ---
@@ -883,13 +901,26 @@ export default function App() {
   //   enableAutomation: true
   // });
 
-  // "Database" mistral
-  const [settings, setSettings] = useState<AppSettings>({ 
-    model: "mistral-large-latest", 
-    language: "en",
-    apiUrl: "https://api.mistral.ai/v1/chat/completions",
-    apiKey: "",
-    enableAutomation: true
+  // Settings with persistence
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    try {
+        const saved = localStorage.getItem("cmwc_settings");
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            // Ensure parsingSites exists in legacy saved data
+            if (!parsed.parsingSites) parsed.parsingSites = DEFAULT_PARSING_SITES;
+            return parsed;
+        }
+    } catch(e) {}
+    
+    return { 
+        model: "mistral-large-latest", 
+        language: "en",
+        apiUrl: "https://api.mistral.ai/v1/chat/completions",
+        apiKey: "",
+        enableAutomation: true,
+        parsingSites: DEFAULT_PARSING_SITES
+    };
   });
   
   const [works, setWorks] = useState<WorkItem[]>(() => {
@@ -918,6 +949,7 @@ export default function App() {
   const [workToAddId, setWorkToAddId] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
+  const [newSite, setNewSite] = useState<Partial<ParsingSite>>({});
   
   // Loading States
   const [loadingRows, setLoadingRows] = useState<Record<string, LoadingState>>({});
@@ -946,6 +978,7 @@ export default function App() {
   }, [settings.language, t]);
 
   useEffect(() => {
+    localStorage.setItem("cmwc_settings", JSON.stringify(settings));
     llmService.updateConfig(settings);
   }, [settings]);
 
@@ -1654,11 +1687,15 @@ export default function App() {
             <span className="font-medium text-gray-500 whitespace-nowrap hidden md:block">{t('collisionControls')}:</span>
             <div className="flex-1 flex flex-col md:flex-row gap-1 md:gap-2">
                  <Input 
+                    list="parsing-sites"
                     placeholder={t('placeholderUrl')}
                     value={urlInput} 
                     onChange={(e:any) => setUrlInput(e.target.value)}
                     className="w-full md:max-w-md"
                 />
+                <datalist id="parsing-sites">
+                    {settings.parsingSites?.map(s => <option key={s.id} value={s.url}>{s.categories} - {s.description}</option>)}
+                </datalist>
                 <div className="flex gap-1 md:gap-2">
                     <Button onClick={handleLoadWorks} disabled={!selectedRowId || !!currentRowLoading} className="flex-1 md:flex-none justify-center">
                         {currentRowLoading ? `${t('btnLoading')}...` : t('btnLoad')}
@@ -2000,6 +2037,53 @@ export default function App() {
                                 <label htmlFor="autoToggle" className="block text-sm font-bold text-gray-800">{t('automationLabel')}</label>
                                 <p className="text-xs text-gray-600">{t('automationHint')}</p>
                              </div>
+                        </div>
+
+                        <div className="pt-4 border-t">
+                            <h3 className="font-medium mb-2">{settings.language === 'ru' ? 'Сайты для парсинга' : 'Parsing Sites'}</h3>
+                            <div className="space-y-2 mb-4 max-h-60 overflow-y-auto pr-2">
+                                {settings.parsingSites?.map((site, idx) => (
+                                    <div key={site.id} className="flex flex-col p-3 border rounded bg-gray-50 gap-1 hover:bg-gray-100 transition-colors">
+                                        <div className="flex justify-between items-start">
+                                            <div className="font-bold text-sm text-gray-800">{site.categories}</div>
+                                            <button 
+                                                onClick={() => {
+                                                    const newSites = [...(settings.parsingSites || [])];
+                                                    newSites.splice(idx, 1);
+                                                    setSettings(s => ({...s, parsingSites: newSites}));
+                                                }} 
+                                                className="text-gray-400 hover:text-red-500 transition-colors"
+                                                title={settings.language === 'ru' ? 'Удалить' : 'Remove'}
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        <div className="text-xs text-blue-600 truncate font-mono select-all cursor-pointer hover:underline" onClick={() => { setUrlInput(site.url); setActiveTab('collision'); }}>{site.url}</div>
+                                        <div className="text-xs text-gray-600">{site.description}</div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="bg-gray-50 p-3 rounded border space-y-2">
+                                <h4 className="text-sm font-bold text-gray-700">{settings.language === 'ru' ? 'Добавить новый сайт' : 'Add New Site'}</h4>
+                                <Input placeholder="URL" value={newSite.url || ''} onChange={(e:any) => setNewSite(s => ({...s, url: e.target.value}))} />
+                                <Input placeholder={settings.language === 'ru' ? 'Категории' : 'Categories'} value={newSite.categories || ''} onChange={(e:any) => setNewSite(s => ({...s, categories: e.target.value}))} />
+                                <Input placeholder={settings.language === 'ru' ? 'Описание' : 'Description'} value={newSite.description || ''} onChange={(e:any) => setNewSite(s => ({...s, description: e.target.value}))} />
+                                <Button 
+                                    onClick={() => {
+                                        if(newSite.url && newSite.categories) {
+                                            setSettings(s => ({
+                                                ...s, 
+                                                parsingSites: [...(s.parsingSites || []), { id: Date.now().toString(), url: newSite.url!, categories: newSite.categories!, description: newSite.description || '' }]
+                                            }));
+                                            setNewSite({});
+                                        }
+                                    }} 
+                                    disabled={!newSite.url || !newSite.categories}
+                                    className="w-full justify-center"
+                                >
+                                    {settings.language === 'ru' ? 'Добавить' : 'Add'}
+                                </Button>
+                            </div>
                         </div>
 
                         <div className="pt-4 border-t">
