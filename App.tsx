@@ -76,12 +76,31 @@ interface BulkStatus {
     label: string;
 }
 
+interface ImportedFile {
+    id: string;
+    filename: string;
+    timestamp: number;
+    collisionCount: number;
+    rowId: string | null;
+    colId: string | null;
+}
+
 // --- Constants & Translations ---
 
 const TRANSLATIONS = {
   en: {
     appTitle: "Collision Cost MVP",
-    tabs: { collision: "Collision", cost: "Cost", settings: "Settings", logs: "Logs" },
+    tabs: { collision: "Collision", cost: "Cost", import: "Import", settings: "Settings", logs: "Logs" },
+    importTitle: "Import Collision Reports (XML)",
+    importDesc: "Upload XML reports from Navisworks or similar tools to map collisions to the matrix.",
+    uploadBtn: "Upload XML",
+    noFiles: "No files uploaded yet.",
+    fileName: "File Name",
+    collisions: "Collisions",
+    mappedRow: "Row (Category 1)",
+    mappedCol: "Column (Category 2)",
+    importMatrix: "Import Matrix (Total Cost)",
+    totalCost: "Total Estimated Cost",
     collisionControls: "Collision Matrix Controls",
     placeholderUrl: "Pricing Source URL (e.g. ferrum-price.com)...",
     btnLoad: "Load Works",
@@ -199,7 +218,17 @@ const TRANSLATIONS = {
   },
   ru: {
     appTitle: "Collision Cost MVP",
-    tabs: { collision: "Коллизии", cost: "Стоимость", settings: "Настройки", logs: "Логи" },
+    tabs: { collision: "Коллизии", cost: "Стоимость", import: "Импорт", settings: "Настройки", logs: "Логи" },
+    importTitle: "Импорт отчетов о коллизиях (XML)",
+    importDesc: "Загрузите XML отчеты из Navisworks или аналогов для сопоставления коллизий с матрицей.",
+    uploadBtn: "Загрузить XML",
+    noFiles: "Файлы пока не загружены.",
+    fileName: "Имя файла",
+    collisions: "Коллизии",
+    mappedRow: "Строка (Категория 1)",
+    mappedCol: "Столбец (Категория 2)",
+    importMatrix: "Матрица Импорта (Общая стоимость)",
+    totalCost: "Общая оценочная стоимость",
     collisionControls: "Управление матрицей коллизий",
     placeholderUrl: "URL источника цен (например, ferrum-price.com)...",
     btnLoad: "Загрузить работы",
@@ -890,7 +919,13 @@ const ToggleButton = ({ open, onClick }: { open: boolean, onClick: () => void })
 
 export default function App() {
   // --- State ---
-  const [activeTab, setActiveTab] = useState<"collision" | "cost" | "settings" | "logs">("collision");
+  const [activeTab, setActiveTab] = useState<"collision" | "cost" | "import" | "settings" | "logs">("collision");
+  const [importedFiles, setImportedFiles] = useState<ImportedFile[]>(() => {
+    try {
+      const saved = localStorage.getItem("cmwc_imported_files");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [catDropdownOpen, setCatDropdownOpen] = useState(false);
   
   // "Database" google
@@ -991,6 +1026,10 @@ export default function App() {
     localStorage.setItem("cmwc_scenarios", JSON.stringify(scenarios));
   }, [scenarios]);
 
+  useEffect(() => {
+    localStorage.setItem("cmwc_imported_files", JSON.stringify(importedFiles));
+  }, [importedFiles]);
+
   const addLog = (action: string, status: "success" | "error", details: string, tokens: number = 0) => {
     const newLog: LogEntry = {
       id: generateId(),
@@ -1057,6 +1096,192 @@ export default function App() {
   };
 
   // --- Actions ---
+
+  const detectCategories = (filename: string): { r: string | null, c: string | null } => {
+      const parts = filename.split(/[-_]/).map(p => p.trim().toUpperCase());
+      let r: string | null = null;
+      let c: string | null = null;
+      
+      // Map simplified codes to IDs
+      const codeMap: Record<string, string[]> = {
+          "АР": ["AR_WALLS", "AR_DOORS"],
+          "AR": ["AR_WALLS", "AR_DOORS"],
+          "КР": ["KR_WALLS", "KR_COLS", "KR_SLABS", "KR_BEAMS"],
+          "KR": ["KR_WALLS", "KR_COLS", "KR_SLABS", "KR_BEAMS"],
+          "ВК": ["VK_K", "VK_V"],
+          "VK": ["VK_K", "VK_V"],
+          "ОВ": ["OV_VENT", "OV_HEAT"],
+          "OV": ["OV_VENT", "OV_HEAT"],
+          "АУПТ": ["AUPT_PIPE", "AUPT_SPR"],
+          "AUPT": ["AUPT_PIPE", "AUPT_SPR"],
+          "ЭОМ": ["EOM"],
+          "EOM": ["EOM"],
+          "ЭО": ["EOM"],
+          "ЭС": ["EOM"],
+          "ЭМ": ["EOM"],
+          "СС": ["EOM"]
+      };
+
+      // Helper to check keywords if code is ambiguous (like KR)
+      const refinement = (possibleIds: string[], text: string) => {
+          if (possibleIds.length === 1) return possibleIds[0];
+          
+          const textLower = text.toLowerCase();
+          
+          // AR Refinement
+          if (possibleIds.includes("AR_WALLS") && (textLower.includes("стен") || textLower.includes("верт"))) return "AR_WALLS";
+          if (possibleIds.includes("AR_DOORS") && (textLower.includes("двер") || textLower.includes("окон"))) return "AR_DOORS";
+
+          // KR Refinement
+          if (possibleIds.includes("KR_SLABS") && (textLower.includes("перекрыт") || textLower.includes("плит") || textLower.includes("горизонт"))) return "KR_SLABS";
+          if (possibleIds.includes("KR_WALLS") && (textLower.includes("стен"))) return "KR_WALLS";
+          if (possibleIds.includes("KR_COLS") && (textLower.includes("колон") || textLower.includes("пилон"))) return "KR_COLS";
+          if (possibleIds.includes("KR_BEAMS") && (textLower.includes("балк") || textLower.includes("ригел"))) return "KR_BEAMS";
+          
+          // OV Refinement
+          if (possibleIds.includes("OV_VENT") && (textLower.includes("вент") || textLower.includes("воздух"))) return "OV_VENT";
+          if (possibleIds.includes("OV_HEAT") && (textLower.includes("отоп") || textLower.includes("тепл"))) return "OV_HEAT";
+
+          // VK Refinement
+          if (possibleIds.includes("VK_K") && (textLower.includes("канал") || textLower.includes("сток"))) return "VK_K";
+          if (possibleIds.includes("VK_V") && (textLower.includes("вод"))) return "VK_V";
+
+          // AUPT Refinement
+          if (possibleIds.includes("AUPT_PIPE") && (textLower.includes("труб"))) return "AUPT_PIPE";
+          if (possibleIds.includes("AUPT_SPR") && (textLower.includes("спринкл"))) return "AUPT_SPR";
+          
+          return possibleIds[0];
+      };
+
+      const foundIds: string[] = [];
+      const partsLower = parts.map(p => p.toLowerCase());
+
+      // Attempt to extract two distinct categories
+      // We look for patterns like "AR... - AR..."
+      // Simple splitting by separator might be misleading if we need to refine based on the specific part context
+      
+      // Let's rely on the original filename/string but split by " - " or similar broad delimiters first to separate left/right
+      const mainParts = filename.split(/\s+[-_]\s+/); // Split by " - " or " _ " with spaces
+      
+      const processPart = (text: string) => {
+           const textUpper = text.toUpperCase();
+           for (const [code, ids] of Object.entries(codeMap)) {
+              if (textUpper.includes(code)) {
+                   return refinement(ids, text);
+              }
+           }
+           return null;
+      };
+
+      if (mainParts.length >= 2) {
+           // We have clear separation like "11.05_АР (Верт)" and "АР (Окна и Двери)"
+           const id1 = processPart(mainParts[0]);
+           const id2 = processPart(mainParts[1]);
+           if (id1) foundIds.push(id1);
+           if (id2) foundIds.push(id2);
+      } else {
+          // Fallback to original logic if no clear delimiter
+          parts.forEach(part => {
+            const cleanPart = part.split('(')[0].trim(); // This might strip useful info like (Верт)
+            // Instead of stripping, let's use the full part for matching code, but pass full part to refinement
+             for (const [code, ids] of Object.entries(codeMap)) {
+                  if (cleanPart.includes(code)) {
+                       // Pass the specific part text to refinement, not the whole filename, to avoid cross-contamination
+                       foundIds.push(refinement(ids, part)); 
+                       break;
+                  }
+              }
+          });
+      }
+
+      if (foundIds.length >= 1) r = foundIds[0];
+      if (foundIds.length >= 2) c = foundIds[1];
+      
+      return { r, c };
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const content = evt.target?.result as string;
+            try {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(content, "text/xml");
+                
+                let count = 0;
+                const summary = xmlDoc.getElementsByTagName("summary")[0];
+                if (summary && summary.getAttribute("total")) {
+                    count = parseInt(summary.getAttribute("total") || "0", 10);
+                } else {
+                    count = xmlDoc.getElementsByTagName("clashresult").length;
+                }
+
+                let { r, c } = detectCategories(file.name);
+                
+                // Fallback to clashtest name if filename didn't work
+                if (!r || !c) {
+                    const clashtest = xmlDoc.getElementsByTagName("clashtest")[0];
+                    if (clashtest && clashtest.getAttribute("name")) {
+                        const name = clashtest.getAttribute("name") || "";
+                        const fromName = detectCategories(name);
+                        if (!r) r = fromName.r;
+                        if (!c) c = fromName.c;
+                    }
+                }
+                
+                const newFile: ImportedFile = {
+                    id: generateId(),
+                    filename: file.name,
+                    timestamp: Date.now(),
+                    collisionCount: count,
+                    rowId: r,
+                    colId: c
+                };
+                
+                setImportedFiles(prev => [...prev, newFile]);
+                addLog("Import XML", "success", `Imported ${file.name}: ${count} collisions.`);
+            } catch (err) {
+                console.error("XML Parse Error", err);
+                addLog("Import XML", "error", `Failed to parse ${file.name}`);
+            }
+        };
+        reader.readAsText(file);
+    });
+    e.target.value = "";
+  };
+  
+  const handleDeleteImportedFile = (id: string) => {
+      setImportedFiles(prev => prev.filter(f => f.id !== id));
+  };
+
+  const calculateImportCost = (rId: string, cId: string) => {
+      const cellFiles = importedFiles.filter(f => 
+          (f.rowId === rId && f.colId === cId) || (f.rowId === cId && f.colId === rId)
+      );
+      
+      if (cellFiles.length === 0) return null;
+      
+      const totalCollisions = cellFiles.reduce((sum, f) => sum + f.collisionCount, 0);
+      const cellScenarios = scenarios.filter(s => s.matrixKey === `${rId}:${cId}`);
+      
+      let unitCost = 0;
+      if (cellScenarios.length > 0) {
+          const costs = cellScenarios.map(calculateScenarioCost);
+          const sumCost = costs.reduce((a, b) => a + b, 0);
+          unitCost = sumCost / costs.length;
+      }
+      
+      return {
+          collisionCount: totalCollisions,
+          unitCost: unitCost,
+          totalCost: totalCollisions * unitCost,
+          fileCount: cellFiles.length
+      };
+  };
 
   const processLoadWorks = async (targetRowId: string) => {
     if (!urlInput || !targetRowId) return;
@@ -1514,7 +1739,7 @@ export default function App() {
     return { min, max, count: cellScenarios.length };
   };
 
-  const renderMatrix = (type: "collision" | "cost") => (
+  const renderMatrix = (type: "collision" | "cost" | "import") => (
     <div className="overflow-auto flex-1 bg-white border rounded shadow-sm relative">
       <div className="grid min-w-[var(--matrix-min-width)]" style={{ gridTemplateColumns: `var(--matrix-first-col-width) repeat(${localizedDisciplines.length}, 1fr)` }}>
         <div className="sticky top-0 left-0 z-30 bg-gray-100 p-2 md:p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-24">
@@ -1596,6 +1821,23 @@ export default function App() {
                      <span className="text-sm md:text-base">{symbol}</span>
                    </div>
                  );
+              } else if (type === "import") {
+                  const importData = calculateImportCost(r.id, c.id);
+                  const hasData = importData && importData.collisionCount > 0;
+                  return (
+                      <div key={c.id} className={`border-b border-r border-gray-200 p-1 flex flex-col items-center justify-center text-sm h-[var(--matrix-cell-height)] hover:bg-gray-50 transition-colors ${hasData ? 'bg-indigo-50' : ''}`}>
+                          {hasData ? (
+                              <>
+                                  <span className="font-bold text-gray-800 text-base">{importData.collisionCount}</span>
+                                  <span className="text-xs text-gray-600 font-mono mt-0.5">
+                                      {Math.round(importData.totalCost).toLocaleString()} {getCurrencySymbol(settings.language)}
+                                  </span>
+                              </>
+                          ) : (
+                              <span className="text-gray-300">-</span>
+                          )}
+                      </div>
+                  );
               } else {
                  const costData = getCellCostRange(r.id, c.id);
                  const isCellLoading = loadingCells[cellKey];
@@ -1671,7 +1913,7 @@ export default function App() {
     <div className="h-full flex flex-col bg-[var(--bg-app)]">
       <div className="bg-white border-b border-[var(--border)] px-4 md:px-6 py-2 md:py-3 flex flex-row items-center justify-between gap-3 shadow-sm z-20">
         <div className="flex bg-gray-100 p-1 rounded-lg flex-1 overflow-x-auto no-scrollbar">
-          {(["collision", "cost", "settings", "logs"] as const).map(tab => (
+          {(["collision", "cost", "import", "settings", "logs"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -2015,6 +2257,91 @@ export default function App() {
                      </>
                  )}
              </div>
+        )}
+
+        {activeTab === "import" && (
+            <div className="flex-1 flex flex-col overflow-hidden w-full h-full bg-[var(--bg-app)]">
+                 <div className="flex-none p-4 bg-white border-b shadow-sm z-20 flex flex-col md:flex-row gap-4 items-center justify-between">
+                     <div className="flex items-center gap-4 w-full md:w-auto">
+                        <div className="relative">
+                            <input 
+                                type="file" 
+                                id="xmlUpload" 
+                                multiple 
+                                accept=".xml" 
+                                className="hidden" 
+                                onChange={handleFileUpload}
+                            />
+                            <label htmlFor="xmlUpload" className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow flex items-center gap-2 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                {t('uploadBtn')}
+                            </label>
+                        </div>
+                        <div className="text-sm text-gray-500 hidden md:block border-l pl-4">
+                             {t('importDesc')}
+                        </div>
+                     </div>
+                     <div className="flex items-center gap-4">
+                         <div className="text-right">
+                             <div className="text-xs text-gray-500 uppercase font-bold">{t('totalCost')}</div>
+                             <div className="text-xl font-bold text-gray-900">
+                                 {(() => {
+                                     let total = 0;
+                                     localizedDisciplines.forEach(r => {
+                                         localizedDisciplines.forEach(c => {
+                                             const data = calculateImportCost(r.id, c.id);
+                                             if (data) total += data.totalCost;
+                                         });
+                                     });
+                                     return Math.round(total).toLocaleString(settings.language === 'ru' ? 'ru-RU' : 'en-US') + " " + getCurrencySymbol(settings.language);
+                                 })()}
+                             </div>
+                         </div>
+                     </div>
+                 </div>
+
+                 <div className="flex-1 flex overflow-hidden">
+                     <div className="w-80 flex-none bg-white border-r flex flex-col z-10 hidden md:flex">
+                         <div className="p-3 border-b bg-gray-50 font-bold text-gray-700 text-sm flex justify-between items-center">
+                             <span>{t('fileName')}</span>
+                             <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">{importedFiles.length}</span>
+                         </div>
+                         <div className="flex-1 overflow-y-auto">
+                             {importedFiles.length === 0 ? (
+                                 <div className="p-8 text-center text-gray-400 text-sm">{t('noFiles')}</div>
+                             ) : (
+                                 <div className="divide-y divide-gray-100">
+                                     {importedFiles.map(f => {
+                                         const r = localizedDisciplines.find(d => d.id === f.rowId);
+                                         const c = localizedDisciplines.find(d => d.id === f.colId);
+                                         return (
+                                             <div key={f.id} className="p-3 hover:bg-gray-50 group">
+                                                 <div className="flex justify-between items-start mb-1">
+                                                     <div className="font-medium text-sm text-gray-900 truncate max-w-[180px]" title={f.filename}>{f.filename}</div>
+                                                     <button onClick={() => handleDeleteImportedFile(f.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                                                 </div>
+                                                 <div className="flex justify-between items-center text-xs text-gray-500">
+                                                     <span>{new Date(f.timestamp).toLocaleTimeString()}</span>
+                                                     <span className="bg-blue-50 text-blue-700 px-1.5 rounded">{f.collisionCount}</span>
+                                                 </div>
+                                                 <div className="mt-1 flex flex-wrap gap-1">
+                                                     {r && <span className="text-[10px] bg-gray-100 border px-1 rounded">{r.code}</span>}
+                                                     {c && <span className="text-[10px] bg-gray-100 border px-1 rounded">{c.code}</span>}
+                                                     {!r && !c && <span className="text-[10px] text-red-400">Unmapped</span>}
+                                                 </div>
+                                             </div>
+                                         );
+                                     })}
+                                 </div>
+                             )}
+                         </div>
+                     </div>
+
+                     <div className="flex-1 flex flex-col overflow-hidden relative">
+                         {renderMatrix("import")}
+                     </div>
+                 </div>
+            </div>
         )}
 
         {activeTab === "settings" && (
