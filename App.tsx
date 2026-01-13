@@ -891,6 +891,7 @@ const ToggleButton = ({ open, onClick }: { open: boolean, onClick: () => void })
 export default function App() {
   // --- State ---
   const [activeTab, setActiveTab] = useState<"collision" | "cost" | "settings" | "logs">("collision");
+  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
   
   // "Database" google
   // const [settings, setSettings] = useState<AppSettings>({ 
@@ -1521,9 +1522,13 @@ export default function App() {
         </div>
         {localizedDisciplines.map(d => {
             const style = getDisciplineStyle(d);
+            const siteCount = settings.parsingSites?.filter(s => s.categories && s.categories.includes(d.code)).length || 0;
             return (
                 <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-24" style={{ backgroundColor: style.bg }}>
-                    <span className="font-bold text-sm md:text-base" style={{ color: style.text }}>{d.code}</span>
+                    <span className="font-bold text-sm md:text-base" style={{ color: style.text }}>
+                        {d.code}
+                        {siteCount > 0 && <span className="ml-1 text-[10px] opacity-80">({siteCount})</span>}
+                    </span>
                     <span className="text-[10px] leading-tight mt-1 opacity-80 max-w-[90px] truncate hidden md:block" style={{ color: style.text }} title={d.name}>{d.name}</span>
                 </div>
             );
@@ -1686,16 +1691,32 @@ export default function App() {
         <div className="bg-white border-b px-2 md:px-6 py-2 md:py-3 flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-3 text-sm shadow-sm z-10">
             <span className="font-medium text-gray-500 whitespace-nowrap hidden md:block">{t('collisionControls')}:</span>
             <div className="flex-1 flex flex-col md:flex-row gap-1 md:gap-2">
-                 <Input 
-                    list="parsing-sites"
-                    placeholder={t('placeholderUrl')}
-                    value={urlInput} 
-                    onChange={(e:any) => setUrlInput(e.target.value)}
-                    className="w-full md:max-w-md"
-                />
-                <datalist id="parsing-sites">
-                    {settings.parsingSites?.map(s => <option key={s.id} value={s.url}>{s.categories} - {s.description}</option>)}
-                </datalist>
+                 <div className="w-full md:max-w-md flex flex-col gap-1">
+                     <Input 
+                        list="parsing-sites"
+                        placeholder={t('placeholderUrl')}
+                        value={urlInput} 
+                        onChange={(e:any) => setUrlInput(e.target.value)}
+                        className="w-full"
+                    />
+                    <datalist id="parsing-sites">
+                        {settings.parsingSites?.map(s => <option key={s.id} value={s.url}>{s.categories} - {s.description}</option>)}
+                    </datalist>
+                    <select 
+                        className="text-xs border rounded p-1 bg-gray-50 text-gray-700 w-full truncate cursor-pointer hover:bg-gray-100"
+                        onChange={(e) => {
+                            if(e.target.value) setUrlInput(e.target.value);
+                        }}
+                        value=""
+                    >
+                        <option value="" disabled>{settings.language === 'ru' ? '-- Выберите сохраненный сайт --' : '-- Select saved site --'}</option>
+                        {settings.parsingSites?.map(s => (
+                            <option key={s.id} value={s.url}>
+                                [{s.categories}] {s.description.substring(0, 60)}...
+                            </option>
+                        ))}
+                    </select>
+                 </div>
                 <div className="flex gap-1 md:gap-2">
                     <Button onClick={handleLoadWorks} disabled={!selectedRowId || !!currentRowLoading} className="flex-1 md:flex-none justify-center">
                         {currentRowLoading ? `${t('btnLoading')}...` : t('btnLoad')}
@@ -2066,7 +2087,63 @@ export default function App() {
                             <div className="bg-gray-50 p-3 rounded border space-y-2">
                                 <h4 className="text-sm font-bold text-gray-700">{settings.language === 'ru' ? 'Добавить новый сайт' : 'Add New Site'}</h4>
                                 <Input placeholder="URL" value={newSite.url || ''} onChange={(e:any) => setNewSite(s => ({...s, url: e.target.value}))} />
-                                <Input placeholder={settings.language === 'ru' ? 'Категории' : 'Categories'} value={newSite.categories || ''} onChange={(e:any) => setNewSite(s => ({...s, categories: e.target.value}))} />
+                                <div className="relative">
+                                    <div 
+                                        className="w-full bg-white text-gray-900 border border-gray-300 rounded px-3 py-2 text-sm cursor-pointer flex justify-between items-center"
+                                        onClick={() => setCatDropdownOpen(!catDropdownOpen)}
+                                    >
+                                        <span className={!newSite.categories ? "text-gray-400" : ""}>
+                                            {newSite.categories || (settings.language === 'ru' ? 'Выберите категории' : 'Select Categories')}
+                                        </span>
+                                        <span className="text-gray-400">▼</span>
+                                    </div>
+                                    {catDropdownOpen && (
+                                        <>
+                                            <div className="fixed inset-0 z-0" onClick={() => setCatDropdownOpen(false)}></div>
+                                            <div className="absolute z-10 w-full bg-white border border-gray-300 rounded shadow-lg mt-1 max-h-60 overflow-y-auto p-2">
+                                                <div className="flex justify-between mb-2 pb-2 border-b">
+                                                    <span className="font-bold text-xs text-gray-500 uppercase">
+                                                        {settings.language === 'ru' ? 'Категории' : 'Categories'}
+                                                    </span>
+                                                    <button 
+                                                        className="text-xs text-blue-600 hover:underline"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            const allCodes = Array.from(new Set(localizedDisciplines.map(d => d.code))).join(', ');
+                                                            setNewSite(s => ({...s, categories: allCodes}));
+                                                        }}
+                                                    >
+                                                        {settings.language === 'ru' ? 'Выбрать все' : 'Select All'}
+                                                    </button>
+                                                </div>
+                                                {Array.from(new Set(localizedDisciplines.map(d => d.code))).map(code => {
+                                                    const isSelected = newSite.categories?.split(',').map(c => c.trim()).includes(code);
+                                                    return (
+                                                        <label key={code} className="flex items-center gap-2 p-1 hover:bg-gray-50 cursor-pointer">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                checked={!!isSelected} 
+                                                                onChange={(e) => {
+                                                                    const current = newSite.categories ? newSite.categories.split(',').map(c => c.trim()).filter(c => c) : [];
+                                                                    let next;
+                                                                    if (e.target.checked) {
+                                                                        if (!current.includes(code)) next = [...current, code];
+                                                                        else next = current;
+                                                                    } else {
+                                                                        next = current.filter(c => c !== code);
+                                                                    }
+                                                                    setNewSite(s => ({...s, categories: next.join(', ')}));
+                                                                }}
+                                                                className="rounded text-blue-600 focus:ring-blue-500"
+                                                            />
+                                                            <span className="text-sm">{code}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
                                 <Input placeholder={settings.language === 'ru' ? 'Описание' : 'Description'} value={newSite.description || ''} onChange={(e:any) => setNewSite(s => ({...s, description: e.target.value}))} />
                                 <Button 
                                     onClick={() => {
