@@ -2496,7 +2496,7 @@ export default function App() {
                             <div className="flex gap-3 items-center">
                                 <Button variant="secondary" onClick={handleExportData}>{t('btnExport')}</Button>
                                 <div className="relative"><input type="file" accept=".json" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleImportData} /><Button variant="secondary">{t('btnImport')}</Button></div>
-                                <Button variant="primary" onClick={handleLoadDemo}>{t('btnLoadDemo')}</Button>
+                                <Button variant="primary" onClick={handleLoadDemo}>{t('LoadDemo')}</Button>
                                 <span className="text-xs text-gray-500">{works.length} works, {scenarios.length} scenarios loaded.</span>
                             </div>
                             <div className="mt-4"><Button variant="danger" onClick={() => { if(confirm("Are you sure you want to reset all data? This cannot be undone.")) { setWorks([]); setScenarios([]); localStorage.removeItem("cmwc_works"); localStorage.removeItem("cmwc_scenarios"); addLog("Reset", "success", "All data cleared."); } }}>{t('btnReset')}</Button></div>
