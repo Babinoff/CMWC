@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 .env
 example/*.xml
+example/collision_reports/*.xml
