@@ -1014,6 +1014,7 @@ export default function App() {
   const [panelOpen, setPanelOpen] = useState(true);
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
   const [newSite, setNewSite] = useState<Partial<ParsingSite>>({});
+  const [parsingMode, setParsingMode] = useState<'auto' | 'manual'>('manual');
   
   // Loading States
   const [loadingRows, setLoadingRows] = useState<Record<string, LoadingState>>({});
@@ -1253,17 +1254,33 @@ export default function App() {
   };
 
   const processLoadWorks = async (targetRowId: string) => {
-    if (!urlInput || !targetRowId) return;
-    
     const targetCategory = localizedDisciplines.find(d => d.id === targetRowId);
     if (!targetCategory) return;
+
+    let targetUrl = urlInput;
+    if (parsingMode === 'auto') {
+        // Find site that contains the category code in its comma-separated list
+        const site = settings.parsingSites.find(s => 
+            s.categories.split(',').map(c => c.trim()).includes(targetCategory.code)
+        );
+        
+        if (site) {
+            targetUrl = site.url;
+        } else {
+             addLog("Load Works", "error", `No site configured for category ${targetCategory.code} in Auto mode.`);
+             return; // Skip this category
+        }
+    } else {
+        // Manual mode
+        if (!targetUrl) return;
+    }
 
     startProgress(targetRowId, setLoadingRows, t('steps.parsing'));
     let totalTokens = 0;
 
     try {
       const { works: rawWorks, tokens: t1, status } = await llmService.parseWorks(
-          urlInput, 
+          targetUrl, 
           {
             code: targetCategory.code,
             name: targetCategory.name,
@@ -1306,7 +1323,7 @@ export default function App() {
           price: typeof rw.price === 'number' ? rw.price : 0,
           currency: ['RUB', 'RUR', 'РУБ', '₽', 'USD', 'DOLLAR', '$'].includes((rw.currency || '').toUpperCase()) ? undefined : rw.currency,
           unit: rw.unit || "unit",
-          source: urlInput,
+          source: targetUrl,
           score: score,
           status: score >= minScope ? "accepted" : "pending"
         };
@@ -1441,7 +1458,7 @@ export default function App() {
 
   const handleBulkLoadAll = async () => {
     if (!settings.enableAutomation) return;
-    if (!urlInput) {
+    if (parsingMode === 'manual' && !urlInput) {
         alert("Please enter a Pricing Source URL first.");
         return;
     }
@@ -1903,30 +1920,54 @@ export default function App() {
             <span className="font-medium text-gray-500 whitespace-nowrap hidden md:block">{t('collisionControls')}:</span>
             <div className="flex-1 flex flex-col md:flex-row gap-1 md:gap-2">
                  <div className="w-full md:max-w-md flex flex-col gap-1">
-                     <Input 
-                        list="parsing-sites"
-                        placeholder={t('placeholderUrl')}
-                        value={urlInput} 
-                        onChange={(e:any) => setUrlInput(e.target.value)}
-                        className="w-full"
-                    />
-                    <datalist id="parsing-sites">
-                        {settings.parsingSites?.map(s => <option key={s.id} value={s.url}>{s.categories} - {s.description}</option>)}
-                    </datalist>
-                    <select 
-                        className="text-xs border rounded p-1 bg-gray-50 text-gray-700 w-full truncate cursor-pointer hover:bg-gray-100"
-                        onChange={(e) => {
-                            if(e.target.value) setUrlInput(e.target.value);
-                        }}
-                        value=""
-                    >
-                        <option value="" disabled>{settings.language === 'ru' ? '-- Выберите сохраненный сайт --' : '-- Select saved site --'}</option>
-                        {settings.parsingSites?.map(s => (
-                            <option key={s.id} value={s.url}>
-                                [{s.categories}] {s.description.substring(0, 60)}...
-                            </option>
-                        ))}
-                    </select>
+                     <div className="flex bg-gray-100 p-0.5 rounded border mb-1">
+                         <button 
+                             className={`flex-1 text-xs py-1 rounded transition-all ${parsingMode === 'auto' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
+                             onClick={() => setParsingMode('auto')}
+                         >
+                             {settings.language === 'ru' ? 'Автоматически' : 'Auto'}
+                         </button>
+                         <button 
+                             className={`flex-1 text-xs py-1 rounded transition-all ${parsingMode === 'manual' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
+                             onClick={() => setParsingMode('manual')}
+                         >
+                             {settings.language === 'ru' ? 'Вручную' : 'Manual'}
+                         </button>
+                     </div>
+                     {parsingMode === 'manual' ? (
+                        <>
+                             <Input 
+                                list="parsing-sites"
+                                placeholder={t('placeholderUrl')}
+                                value={urlInput} 
+                                onChange={(e:any) => setUrlInput(e.target.value)}
+                                className="w-full"
+                            />
+                            <datalist id="parsing-sites">
+                                {settings.parsingSites?.map(s => <option key={s.id} value={s.url}>{s.categories} - {s.description}</option>)}
+                            </datalist>
+                            <select 
+                                className="text-xs border rounded p-1 bg-gray-50 text-gray-700 w-full truncate cursor-pointer hover:bg-gray-100"
+                                onChange={(e) => {
+                                    if(e.target.value) setUrlInput(e.target.value);
+                                }}
+                                value=""
+                            >
+                                <option value="" disabled>{settings.language === 'ru' ? '-- Выберите сохраненный сайт --' : '-- Select saved site --'}</option>
+                                {settings.parsingSites?.map(s => (
+                                    <option key={s.id} value={s.url}>
+                                        [{s.categories}] {s.description.substring(0, 60)}...
+                                    </option>
+                                ))}
+                            </select>
+                        </>
+                     ) : (
+                         <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded border text-center flex items-center justify-center min-h-[60px]">
+                             {settings.language === 'ru' 
+                                ? 'Сайты будут выбраны автоматически из настроек для каждой категории' 
+                                : 'Sites will be selected automatically from settings for each category'}
+                         </div>
+                     )}
                  </div>
                 <div className="flex gap-1 md:gap-2">
                     <Button onClick={handleLoadWorks} disabled={!selectedRowId || !!currentRowLoading} className="flex-1 md:flex-none justify-center">
