@@ -396,6 +396,13 @@ const DEFAULT_PARSING_SITES: ParsingSite[] = [
   { id: "site_5", url: "https://stroyremdizayn.ru/uslugi/elektromontazhnye-raboty-na-kommercheskih-obektah", categories: "ЭОМ (Электрика)", description: "Электромонтажные работы на коммерческих объектах" },
   { id: "site_6", url: "https://remelit.ru/remont-kvartir-tsena/", categories: "Ремонт квартир", description: "Цены на ремонт квартир в Москве и области" },
   { id: "site_7", url: "https://kronotech.ru/stroitelnye-raboty/montazh-inzhenernyh-sistem", categories: "Инженерные системы", description: "Монтаж инженерных систем" },
+  { id: "1770111963115", url: "https://garantstroikompleks.ru/prajs-list", categories: "АР, КР, ВК (К), ВК (В), ОВ (Вент.), ОВ (Отоп.), АУПТ, ЭО, ЭС, ЭМ, СС", description: "Общестрой" },
+  { id: "1770111983019", url: "https://stroyremdizayn.ru/almaznaya-rezka-betona", categories: "КР", description: "Алмазная резка бетона, стен и перекрытий" },
+  { id: "1770111994637", url: "https://stroyremdizayn.ru/uslugi/santekhnika-vodosnabzhenie-i-kanalizaciya", categories: "ВК (В), ВК (К)", description: "Услуги сантехника, водоснабжение и канализация" },
+  { id: "1770112169240", url: "https://stroyremdizayn.ru/demontazh-sten-i-peregorodok", categories: "АР, КР", description: "Демонтаж" },
+  { id: "1770123899371", url: "https://stroyremdizayn.ru/uslugi/elektromontazhnye-raboty-na-kommercheskih-obektah", categories: "ЭОМ", description: "Электромонтажные работы на коммерческих объектах" },
+  { id: "1770123912232", url: "https://remelit.ru/remont-kvartir-tsena/", categories: "АР (Стены), АР (Двери/Окна), АР (Фасад), АР (Кровля), КР, ВК (К), ВК (В), ОВ (Вент.), ОВ (Отоп.), ОВ (ИТП), АУПТ, ЭОМ, СС, АИ", description: "Цены на ремонт квартир в Москве и области" },
+  { id: "1770123935127", url: "https://kronotech.ru/stroitelnye-raboty/montazh-inzhenernyh-sistem", categories: "ВК (К), ВК (В), ОВ (Вент.), ОВ (Отоп.), ОВ (ИТП), АУПТ, ЭОМ, СС", description: "Монтаж инженерных систем" }
 ];
 
 // --- Helpers ---
