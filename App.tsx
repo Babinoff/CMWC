@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { GoogleGenAI, Type, Schema, HarmCategory, HarmBlockThreshold } from "@google/genai";
+import { detectCategories } from "./utils/collisionParser";
 
 // --- Types & Interfaces ---
 
@@ -152,6 +153,10 @@ const TRANSLATIONS = {
     btnImport: "Import DB (.json)",
     btnLoadDemo: "Load Demo Data",
     demoLoaded: "Demo data loaded successfully!",
+    btnExportSites: "Export Sites (.json)",
+    btnImportSites: "Import Sites (.json)",
+    btnLoadDemoSites: "Load Demo Sites",
+    demoSitesLoaded: "Demo sites loaded!",
     btnReset: "Reset / Clear Data",
     systemStatus: "System Status",
     apiConfigured: "API Configured",
@@ -213,7 +218,13 @@ const TRANSLATIONS = {
         AUPT_SPR_KW: "sprinkler, head, fire",
 
         EOM_NAME: "Trays / Cables", EOM_DESC: "Cable trays, low voltage",
-        EOM_KW: "tray, cable, wire, socket, switch, installation"
+        EOM_KW: "tray, cable, wire, socket, switch, installation",
+
+        AR_FACADE_NAME: "Facades", AR_FACADE_DESC: "Building facades", AR_FACADE_KW: "facade, panel, glass, cladding",
+        AR_ROOF_NAME: "Roofs", AR_ROOF_DESC: "Roofing", AR_ROOF_KW: "roof, tile, waterproofing",
+        OV_ITP_NAME: "Individual Heating Point", OV_ITP_DESC: "Heating point equipment", OV_ITP_KW: "itp, heat exchanger, pump, valve",
+        SS_NAME: "Low Current Systems", SS_DESC: "Security, fire alarm, internet", SS_KW: "alarm, sensor, camera, data, cable",
+        AI_NAME: "Architectural Interiors", AI_DESC: "Interior finishing", AI_KW: "interior, finish, decoration, furniture"
     }
   },
   ru: {
@@ -278,6 +289,12 @@ const TRANSLATIONS = {
     dataMgmtHint: "Данные автоматически сохраняются в LocalStorage браузера. Для сохранения в файл (например, для Git) экспортируйте БД в JSON.",
     btnExport: "Скачать БД (.json)",
     btnImport: "Импортировать БД (.json)",
+    btnLoadDemo: "Загрузить демо-данные",
+    demoLoaded: "Демо-данные успешно загружены!",
+    btnExportSites: "Экспорт сайтов (.json)",
+    btnImportSites: "Импорт сайтов (.json)",
+    btnLoadDemoSites: "Загрузить демо-сайты",
+    demoSitesLoaded: "Демо-сайты загружены!",
     btnReset: "Сбросить / Очистить данные",
     systemStatus: "Статус системы",
     apiConfigured: "API Настроен",
@@ -339,14 +356,22 @@ const TRANSLATIONS = {
         AUPT_SPR_KW: "спринклер, ороситель, пожаротушение",
 
         EOM_NAME: "Кабельканалы / Лотки", EOM_DESC: "Лотки, кабели, слаботочка",
-        EOM_KW: "лоток, кабель, провод, розетка, выключатель, монтаж"
+        EOM_KW: "лоток, кабель, провод, розетка, выключатель, монтаж",
+
+        AR_FACADE_NAME: "Фасады", AR_FACADE_DESC: "Фасадные системы", AR_FACADE_KW: "фасад, панель, остекление, облицовка",
+        AR_ROOF_NAME: "Крыши", AR_ROOF_DESC: "Кровельные работы", AR_ROOF_KW: "кровля, черепица, гидроизоляция",
+        OV_ITP_NAME: "Индивидуальный тепловой пункт", OV_ITP_DESC: "Оборудование ИТП", OV_ITP_KW: "итп, теплообменник, насос, задвижка",
+        SS_NAME: "Слаботочные системы", SS_DESC: "Пожарная сигнализация, СКУД, интернет", SS_KW: "апс, датчик, камера, скс, кабель",
+        AI_NAME: "Архитектурные интерьеры", AI_DESC: "Внутренняя отделка", AI_KW: "интерьер, отделка, декор, мебель"
     }
   }
 };
 
 const DISCIPLINES: Discipline[] = [
-  { id: "AR_WALLS", code: "АР", rank: 2, nameKey: "AR_WALLS_NAME", descKey: "AR_WALLS_DESC", keywordsKey: "AR_WALLS_KW" },
-  { id: "AR_DOORS", code: "АР", rank: 2, nameKey: "AR_DOORS_NAME", descKey: "AR_DOORS_DESC", keywordsKey: "AR_DOORS_KW" },
+  { id: "AR_WALLS", code: "АР (Стены)", rank: 2, nameKey: "AR_WALLS_NAME", descKey: "AR_WALLS_DESC", keywordsKey: "AR_WALLS_KW" },
+  { id: "AR_DOORS", code: "АР (Двери/Окна)", rank: 2, nameKey: "AR_DOORS_NAME", descKey: "AR_DOORS_DESC", keywordsKey: "AR_DOORS_KW" },
+  { id: "AR_FACADE", code: "АР (Фасад)", rank: 2, nameKey: "AR_FACADE_NAME", descKey: "AR_FACADE_DESC", keywordsKey: "AR_FACADE_KW" },
+  { id: "AR_ROOF", code: "АР (Кровля)", rank: 2, nameKey: "AR_ROOF_NAME", descKey: "AR_ROOF_DESC", keywordsKey: "AR_ROOF_KW" },
   { id: "KR_WALLS", code: "КР", rank: 1, nameKey: "KR_WALLS_NAME", descKey: "KR_WALLS_DESC", keywordsKey: "KR_WALLS_KW" },
   { id: "KR_COLS", code: "КР", rank: 1, nameKey: "KR_COLS_NAME", descKey: "KR_COLS_DESC", keywordsKey: "KR_COLS_KW" },
   { id: "KR_SLABS", code: "КР", rank: 1, nameKey: "KR_SLABS_NAME", descKey: "KR_SLABS_DESC", keywordsKey: "KR_SLABS_KW" },
@@ -355,9 +380,12 @@ const DISCIPLINES: Discipline[] = [
   { id: "VK_V", code: "ВК (В)", rank: 5, nameKey: "VK_V_NAME", descKey: "VK_V_DESC", keywordsKey: "VK_V_KW" },
   { id: "OV_VENT", code: "ОВ (Вент.)", rank: 4, nameKey: "OV_VENT_NAME", descKey: "OV_VENT_DESC", keywordsKey: "OV_VENT_KW" },
   { id: "OV_HEAT", code: "ОВ (Отоп.)", rank: 5, nameKey: "OV_HEAT_NAME", descKey: "OV_HEAT_DESC", keywordsKey: "OV_HEAT_KW" },
+  { id: "OV_ITP", code: "ОВ (ИТП)", rank: 5, nameKey: "OV_ITP_NAME", descKey: "OV_ITP_DESC", keywordsKey: "OV_ITP_KW" },
   { id: "AUPT_PIPE", code: "АУПТ", rank: 5, nameKey: "AUPT_PIPE_NAME", descKey: "AUPT_PIPE_DESC", keywordsKey: "AUPT_PIPE_KW" },
   { id: "AUPT_SPR", code: "АУПТ", rank: 5, nameKey: "AUPT_SPR_NAME", descKey: "AUPT_SPR_DESC", keywordsKey: "AUPT_SPR_KW" },
-  { id: "EOM", code: "ЭО, ЭС, ЭМ, СС", rank: 6, nameKey: "EOM_NAME", descKey: "EOM_DESC", keywordsKey: "EOM_KW" },
+  { id: "EOM", code: "ЭОМ", rank: 6, nameKey: "EOM_NAME", descKey: "EOM_DESC", keywordsKey: "EOM_KW" },
+  { id: "SS", code: "СС", rank: 6, nameKey: "SS_NAME", descKey: "SS_DESC", keywordsKey: "SS_KW" },
+  { id: "AI", code: "АИ", rank: 6, nameKey: "AI_NAME", descKey: "AI_DESC", keywordsKey: "AI_KW" },
 ];
 
 const DEFAULT_PARSING_SITES: ParsingSite[] = [
@@ -1095,110 +1123,51 @@ export default function App() {
     }
   };
 
-  // --- Actions ---
-
-  const detectCategories = (filename: string): { r: string | null, c: string | null } => {
-      const parts = filename.split(/[-_]/).map(p => p.trim().toUpperCase());
-      let r: string | null = null;
-      let c: string | null = null;
+  const handleLoadDemoSites = () => {
+      if (settings.parsingSites && settings.parsingSites.length > 0 && !confirm(settings.language === 'ru' ? "Это перезапишет текущий список сайтов. Продолжить?" : "This will overwrite existing sites. Continue?")) return;
       
-      // Map simplified codes to IDs
-      const codeMap: Record<string, string[]> = {
-          "АР": ["AR_WALLS", "AR_DOORS"],
-          "AR": ["AR_WALLS", "AR_DOORS"],
-          "КР": ["KR_WALLS", "KR_COLS", "KR_SLABS", "KR_BEAMS"],
-          "KR": ["KR_WALLS", "KR_COLS", "KR_SLABS", "KR_BEAMS"],
-          "ВК": ["VK_K", "VK_V"],
-          "VK": ["VK_K", "VK_V"],
-          "ОВ": ["OV_VENT", "OV_HEAT"],
-          "OV": ["OV_VENT", "OV_HEAT"],
-          "АУПТ": ["AUPT_PIPE", "AUPT_SPR"],
-          "AUPT": ["AUPT_PIPE", "AUPT_SPR"],
-          "ЭОМ": ["EOM"],
-          "EOM": ["EOM"],
-          "ЭО": ["EOM"],
-          "ЭС": ["EOM"],
-          "ЭМ": ["EOM"],
-          "СС": ["EOM"]
-      };
-
-      // Helper to check keywords if code is ambiguous (like KR)
-      const refinement = (possibleIds: string[], text: string) => {
-          if (possibleIds.length === 1) return possibleIds[0];
-          
-          const textLower = text.toLowerCase();
-          
-          // AR Refinement
-          if (possibleIds.includes("AR_WALLS") && (textLower.includes("стен") || textLower.includes("верт"))) return "AR_WALLS";
-          if (possibleIds.includes("AR_DOORS") && (textLower.includes("двер") || textLower.includes("окон"))) return "AR_DOORS";
-
-          // KR Refinement
-          if (possibleIds.includes("KR_SLABS") && (textLower.includes("перекрыт") || textLower.includes("плит") || textLower.includes("горизонт"))) return "KR_SLABS";
-          if (possibleIds.includes("KR_WALLS") && (textLower.includes("стен"))) return "KR_WALLS";
-          if (possibleIds.includes("KR_COLS") && (textLower.includes("колон") || textLower.includes("пилон"))) return "KR_COLS";
-          if (possibleIds.includes("KR_BEAMS") && (textLower.includes("балк") || textLower.includes("ригел"))) return "KR_BEAMS";
-          
-          // OV Refinement
-          if (possibleIds.includes("OV_VENT") && (textLower.includes("вент") || textLower.includes("воздух"))) return "OV_VENT";
-          if (possibleIds.includes("OV_HEAT") && (textLower.includes("отоп") || textLower.includes("тепл"))) return "OV_HEAT";
-
-          // VK Refinement
-          if (possibleIds.includes("VK_K") && (textLower.includes("канал") || textLower.includes("сток"))) return "VK_K";
-          if (possibleIds.includes("VK_V") && (textLower.includes("вод"))) return "VK_V";
-
-          // AUPT Refinement
-          if (possibleIds.includes("AUPT_PIPE") && (textLower.includes("труб"))) return "AUPT_PIPE";
-          if (possibleIds.includes("AUPT_SPR") && (textLower.includes("спринкл"))) return "AUPT_SPR";
-          
-          return possibleIds[0];
-      };
-
-      const foundIds: string[] = [];
-      const partsLower = parts.map(p => p.toLowerCase());
-
-      // Attempt to extract two distinct categories
-      // We look for patterns like "AR... - AR..."
-      // Simple splitting by separator might be misleading if we need to refine based on the specific part context
-      
-      // Let's rely on the original filename/string but split by " - " or similar broad delimiters first to separate left/right
-      const mainParts = filename.split(/\s+[-_]\s+/); // Split by " - " or " _ " with spaces
-      
-      const processPart = (text: string) => {
-           const textUpper = text.toUpperCase();
-           for (const [code, ids] of Object.entries(codeMap)) {
-              if (textUpper.includes(code)) {
-                   return refinement(ids, text);
-              }
-           }
-           return null;
-      };
-
-      if (mainParts.length >= 2) {
-           // We have clear separation like "11.05_АР (Верт)" and "АР (Окна и Двери)"
-           const id1 = processPart(mainParts[0]);
-           const id2 = processPart(mainParts[1]);
-           if (id1) foundIds.push(id1);
-           if (id2) foundIds.push(id2);
-      } else {
-          // Fallback to original logic if no clear delimiter
-          parts.forEach(part => {
-            const cleanPart = part.split('(')[0].trim(); // This might strip useful info like (Верт)
-            // Instead of stripping, let's use the full part for matching code, but pass full part to refinement
-             for (const [code, ids] of Object.entries(codeMap)) {
-                  if (cleanPart.includes(code)) {
-                       // Pass the specific part text to refinement, not the whole filename, to avoid cross-contamination
-                       foundIds.push(refinement(ids, part)); 
-                       break;
-                  }
-              }
-          });
-      }
-
-      if (foundIds.length >= 1) r = foundIds[0];
-      if (foundIds.length >= 2) c = foundIds[1];
-      
-      return { r, c };
+      setSettings(s => ({ ...s, parsingSites: DEFAULT_PARSING_SITES }));
+      addLog("Load Demo Sites", "success", t('demoSitesLoaded'));
   };
+
+  const handleExportSites = () => {
+    const data = { parsingSites: settings.parsingSites, timestamp: Date.now() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cmwc_sites.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addLog("Export Sites", "success", "Sites exported to JSON file");
+  };
+
+  const handleImportSites = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = JSON.parse(evt.target?.result as string);
+        if (Array.isArray(data.parsingSites)) {
+             setSettings(s => ({ ...s, parsingSites: data.parsingSites }));
+             addLog("Import Sites", "success", `Imported ${data.parsingSites.length} sites`);
+             alert(t('demoSitesLoaded').replace('Demo', 'Imported')); // Hacky but works for now or just use simple alert
+        } else {
+             throw new Error("Invalid format");
+        }
+      } catch (err) {
+        addLog("Import Sites", "error", "Failed to parse file");
+        alert("Failed to parse file. Ensure it is a valid Sites export.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ""; // reset input
+  };
+
+  // --- Actions ---
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1220,14 +1189,14 @@ export default function App() {
                     count = xmlDoc.getElementsByTagName("clashresult").length;
                 }
 
-                let { r, c } = detectCategories(file.name);
+                let { r, c } = detectCategories(file.name, xmlDoc);
                 
                 // Fallback to clashtest name if filename didn't work
                 if (!r || !c) {
                     const clashtest = xmlDoc.getElementsByTagName("clashtest")[0];
                     if (clashtest && clashtest.getAttribute("name")) {
                         const name = clashtest.getAttribute("name") || "";
-                        const fromName = detectCategories(name);
+                        const fromName = detectCategories(name, xmlDoc);
                         if (!r) r = fromName.r;
                         if (!c) c = fromName.c;
                     }
@@ -2486,6 +2455,21 @@ export default function App() {
                                     className="w-full justify-center"
                                 >
                                     {settings.language === 'ru' ? 'Добавить' : 'Add'}
+                                </Button>
+                            </div>
+
+                            <div className="flex gap-2 mt-2">
+                                <Button variant="secondary" onClick={handleExportSites} className="flex-1 text-xs px-2 h-auto py-2">
+                                    {t('btnExportSites')}
+                                </Button>
+                                <label className="flex-1">
+                                    <div className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-2 py-2 rounded-md text-xs font-medium cursor-pointer text-center transition-colors h-full flex items-center justify-center shadow-sm">
+                                        {t('btnImportSites')}
+                                    </div>
+                                    <input type="file" accept=".json" onChange={handleImportSites} className="hidden" />
+                                </label>
+                                <Button variant="secondary" onClick={handleLoadDemoSites} className="flex-1 text-xs px-2 h-auto py-2">
+                                    {t('btnLoadDemoSites')}
                                 </Button>
                             </div>
                         </div>
