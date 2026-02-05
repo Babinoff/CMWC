@@ -1750,14 +1750,14 @@ export default function App() {
   const renderMatrix = (type: "collision" | "cost" | "import") => (
     <div className="overflow-auto flex-1 bg-white border rounded shadow-sm relative">
       <div className="grid min-w-[var(--matrix-min-width)]" style={{ gridTemplateColumns: `var(--matrix-first-col-width) repeat(${localizedDisciplines.length}, 1fr)` }}>
-        <div className="sticky top-0 left-0 z-30 bg-gray-100 p-2 md:p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-24">
+        <div className="sticky top-0 left-0 z-30 bg-gray-100 p-2 md:p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-16">
           {t('table.name')}
         </div>
         {localizedDisciplines.map(d => {
             const style = getDisciplineStyle(d);
             const siteCount = settings.parsingSites?.filter(s => s.categories && s.categories.includes(d.code)).length || 0;
             return (
-                <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-24" style={{ backgroundColor: style.bg }}>
+                <div key={d.id} className="sticky top-0 z-20 p-1 md:p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-16" style={{ backgroundColor: style.bg }}>
                     <span className="font-bold text-sm md:text-base" style={{ color: style.text }}>
                         {d.displayCode}
                         {siteCount > 0 && <span className="ml-1 text-[10px] opacity-80">({siteCount})</span>}
@@ -1923,116 +1923,118 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg-app)]">
-      <div className="bg-white border-b border-[var(--border)] px-4 md:px-6 py-2 md:py-3 flex flex-row items-center justify-between gap-3 shadow-sm z-20">
-        <div className="flex bg-gray-100 p-1 rounded-lg flex-1 overflow-x-auto no-scrollbar">
+      <div className="bg-white border-b border-[var(--border)] px-2 md:px-4 py-1 md:py-2 flex flex-row items-center justify-between gap-2 shadow-sm z-20">
+        <div className="flex bg-gray-100 p-0.5 rounded-lg flex-1 overflow-x-auto no-scrollbar">
           {(["collision", "cost", "import", "settings", "logs"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`flex-none px-3 md:px-4 py-1.5 rounded-md text-sm font-medium transition-all capitalize whitespace-nowrap ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`flex-none px-3 py-1 rounded-md text-xs md:text-sm font-medium transition-all capitalize whitespace-nowrap ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
             >
               {t(`tabs.${tab}`)}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-3 flex-none">
-          <div className="bg-blue-600 text-white p-1.5 rounded font-bold font-mono text-xs md:text-base">CMWC</div>
-          <h1 className="font-semibold text-lg text-gray-800 hidden md:block">{t('appTitle')}</h1>
+        <div className="flex items-center gap-2 flex-none">
+          <div className="bg-blue-600 text-white px-2 py-0.5 rounded font-bold font-mono text-xs md:text-sm">CMWC</div>
+          <h1 className="font-semibold text-sm md:text-base text-gray-800 hidden lg:block">{t('appTitle')}</h1>
         </div>
       </div>
 
       {activeTab === "collision" && (
-        <div className="bg-white border-b px-2 md:px-6 py-2 md:py-3 flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-3 text-sm shadow-sm z-10">
-            <span className="font-medium text-gray-500 whitespace-nowrap hidden md:block">{t('collisionControls')}:</span>
-            <div className="flex-1 flex flex-col md:flex-row gap-1 md:gap-2">
-                 <div className="w-full md:max-w-md flex flex-col gap-1">
-                     <div className="flex bg-gray-100 p-0.5 rounded border mb-1">
-                         <button 
-                             className={`flex-1 text-xs py-1 rounded transition-all ${parsingMode === 'auto' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
-                             onClick={() => setParsingMode('auto')}
-                         >
-                             {settings.language === 'ru' ? 'Автоматически' : 'Auto'}
-                         </button>
-                         <button 
-                             className={`flex-1 text-xs py-1 rounded transition-all ${parsingMode === 'manual' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
-                             onClick={() => setParsingMode('manual')}
-                         >
-                             {settings.language === 'ru' ? 'Вручную' : 'Manual'}
-                         </button>
-                     </div>
-                     {parsingMode === 'manual' ? (
-                        <>
-                             <Input 
-                                list="parsing-sites"
-                                placeholder={t('placeholderUrl')}
-                                value={urlInput} 
-                                onChange={(e:any) => setUrlInput(e.target.value)}
-                                className="w-full"
-                            />
-                            <datalist id="parsing-sites">
-                                {settings.parsingSites?.map(s => <option key={s.id} value={s.url}>{s.categories} - {s.description}</option>)}
-                            </datalist>
+        <div className="bg-white border-b px-2 md:px-4 py-1.5 flex flex-col md:flex-row items-stretch md:items-center gap-2 text-sm shadow-sm z-10">
+            <div className="flex items-center gap-2 flex-1 w-full overflow-hidden">
+                 <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded border shrink-0">
+                     <button 
+                         className={`px-2 py-0.5 text-xs rounded transition-all ${parsingMode === 'auto' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
+                         onClick={() => setParsingMode('auto')}
+                     >
+                         {settings.language === 'ru' ? 'Авто' : 'Auto'}
+                     </button>
+                     <button 
+                         className={`px-2 py-0.5 text-xs rounded transition-all ${parsingMode === 'manual' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
+                         onClick={() => setParsingMode('manual')}
+                     >
+                         {settings.language === 'ru' ? 'Ручной' : 'Manual'}
+                     </button>
+                 </div>
+
+                 {parsingMode === 'manual' ? (
+                    <div className="flex items-center gap-1 flex-1 min-w-[150px] overflow-hidden">
+                        <Input 
+                            list="parsing-sites"
+                            placeholder={t('placeholderUrl')}
+                            value={urlInput} 
+                            onChange={(e:any) => setUrlInput(e.target.value)}
+                            className="w-full text-xs py-1"
+                        />
+                        <datalist id="parsing-sites">
+                            {settings.parsingSites?.map(s => <option key={s.id} value={s.url}>{s.categories} - {s.description}</option>)}
+                        </datalist>
+                        
+                        <div className="relative w-[20px] md:w-[120px] shrink-0">
                             <select 
-                                className="text-xs border rounded p-1 bg-gray-50 text-gray-700 w-full truncate cursor-pointer hover:bg-gray-100"
+                                className="w-full text-xs border rounded p-1 bg-gray-50 text-gray-700 truncate cursor-pointer hover:bg-gray-100"
                                 onChange={(e) => {
                                     if(e.target.value) setUrlInput(e.target.value);
                                 }}
                                 value=""
                             >
-                                <option value="" disabled>{settings.language === 'ru' ? '-- Выберите сохраненный сайт --' : '-- Select saved site --'}</option>
+                                <option value="" disabled>{settings.language === 'ru' ? 'Сохраненные...' : 'Saved...'}</option>
                                 {settings.parsingSites?.map(s => (
                                     <option key={s.id} value={s.url}>
-                                        [{s.categories}] {s.description.substring(0, 60)}...
+                                        [{s.categories}] {s.description.substring(0, 20)}...
                                     </option>
                                 ))}
                             </select>
-                        </>
-                     ) : (
-                         <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded border text-center flex items-center justify-center min-h-[60px]">
-                             {settings.language === 'ru' 
-                                ? 'Сайты будут выбраны автоматически из настроек для каждой категории' 
-                                : 'Sites will be selected automatically from settings for each category'}
-                         </div>
-                     )}
-                 </div>
-                <div className="flex gap-1 md:gap-2">
-                    <Button onClick={handleLoadWorks} disabled={!selectedRowId || !!currentRowLoading} className="flex-1 md:flex-none justify-center">
-                        {currentRowLoading ? `${t('btnLoading')}...` : t('btnLoad')}
-                    </Button>
-                    
-                    {bulkStatus && bulkStatus.type === 'load' ? (
-                        <div className="flex items-center gap-2 flex-1 max-w-xs bg-gray-100 rounded px-3 py-1 border border-blue-200">
-                            <div className="text-xs font-bold text-blue-700 whitespace-nowrap min-w-[60px]">
-                                {Math.round((bulkStatus.current / bulkStatus.total) * 100)}%
-                            </div>
-                            <div className="flex-1 h-2 bg-gray-300 rounded-full overflow-hidden hidden sm:block">
-                                <div className="h-full bg-blue-600 transition-all duration-300" style={{width: `${(bulkStatus.current / bulkStatus.total) * 100}%`}}></div>
-                            </div>
-                            <Button 
-                                variant="danger" 
-                                className={`ml-1 !px-2 !py-0.5 !text-xs ${isStopping ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                onClick={handleStopBulk} 
-                                disabled={isStopping}
-                                title="Stop"
-                            >
-                                Stop
-                            </Button>
                         </div>
-                    ) : (
-                        settings.enableAutomation && (
-                            <Button variant="secondary" onClick={handleBulkLoadAll} title={t('automationHint')} className="flex-1 md:flex-none justify-center">
-                                {t('btnBulkLoad')}
-                            </Button>
-                        )
-                    )}
-                </div>
+                    </div>
+                 ) : (
+                     <div className="text-xs text-gray-500 italic px-2 truncate flex-1">
+                         {settings.language === 'ru' 
+                            ? 'Сайты выбираются автоматически из настроек' 
+                            : 'Sites selected automatically from settings'}
+                     </div>
+                 )}
             </div>
-            <div className="flex items-center justify-between md:justify-start gap-2 border-t md:border-t-0 md:border-l pt-2 md:pt-0 md:pl-4">
-                <div className="flex items-center gap-2">
-                    <span className="text-gray-500 whitespace-nowrap">{t('minScope')}:</span>
-                    <input type="number" step="0.1" min="0" max="1" value={minScope} onChange={(e) => setMinScope(parseFloat(e.target.value))} className="w-16 bg-white text-gray-900 border border-gray-300 rounded p-1 text-sm focus:outline-none focus:border-blue-500" />
+
+            <div className="flex items-center gap-2 shrink-0 justify-end">
+                <Button onClick={handleLoadWorks} disabled={!selectedRowId || !!currentRowLoading} className="px-3 py-1 text-xs whitespace-nowrap">
+                    {currentRowLoading ? t('btnLoading') : t('btnLoad')}
+                </Button>
+                
+                {bulkStatus && bulkStatus.type === 'load' ? (
+                    <div className="flex items-center gap-2 bg-gray-100 rounded px-2 py-1 border border-blue-200">
+                        <div className="text-xs font-bold text-blue-700 whitespace-nowrap">
+                            {Math.round((bulkStatus.current / bulkStatus.total) * 100)}%
+                        </div>
+                        <Button 
+                            variant="danger" 
+                            className="!px-1.5 !py-0 !text-[10px] h-5"
+                            onClick={handleStopBulk} 
+                            disabled={isStopping}
+                            title="Stop"
+                        >
+                            Stop
+                        </Button>
+                    </div>
+                ) : (
+                    settings.enableAutomation && (
+                        <Button variant="secondary" onClick={handleBulkLoadAll} title={t('automationHint')} className="px-3 py-1 text-xs whitespace-nowrap">
+                            {t('btnBulkLoad')}
+                        </Button>
+                    )
+                )}
+            </div>
+
+            <div className="hidden md:block w-px h-6 bg-gray-200 mx-1"></div>
+
+            <div className="flex items-center gap-2 shrink-0 justify-between md:justify-start border-t md:border-t-0 pt-1 md:pt-0">
+                <div className="flex items-center gap-1">
+                    <span className="text-gray-500 text-xs whitespace-nowrap">{t('minScope')}:</span>
+                    <input type="number" step="0.1" min="0" max="1" value={minScope} onChange={(e) => setMinScope(parseFloat(e.target.value))} className="w-10 bg-white text-gray-900 border border-gray-300 rounded p-0.5 text-xs text-center focus:outline-none focus:border-blue-500" />
                 </div>
-                <Button variant="secondary" onClick={handleAcceptWorks} disabled={!selectedRowId}>{t('btnAutoAccept')}</Button>
+                <Button variant="secondary" onClick={handleAcceptWorks} disabled={!selectedRowId} className="px-3 py-1 text-xs whitespace-nowrap">{t('btnAutoAccept')}</Button>
             </div>
         </div>
       )}
