@@ -389,13 +389,6 @@ const DISCIPLINES: Discipline[] = [
 ];
 
 const DEFAULT_PARSING_SITES: ParsingSite[] = [
-  { id: "site_1", url: "https://garantstroikompleks.ru/prajs-list", categories: "Общестрой", description: "Полный прайс-лист на ремонтно-строительные работы" },
-  { id: "site_2", url: "https://stroyremdizayn.ru/almaznaya-rezka-betona", categories: "КР (Бетон)", description: "Алмазная резка бетона, стен и перекрытий" },
-  { id: "site_3", url: "https://stroyremdizayn.ru/uslugi/santekhnika-vodosnabzhenie-i-kanalizaciya", categories: "ВК (Вода/Канализация)", description: "Услуги сантехника, водоснабжение и канализация" },
-  { id: "site_4", url: "https://stroyremdizayn.ru/demontazh-sten-i-peregorodok", categories: "Демонтаж", description: "Демонтаж стен и перегородок" },
-  { id: "site_5", url: "https://stroyremdizayn.ru/uslugi/elektromontazhnye-raboty-na-kommercheskih-obektah", categories: "ЭОМ (Электрика)", description: "Электромонтажные работы на коммерческих объектах" },
-  { id: "site_6", url: "https://remelit.ru/remont-kvartir-tsena/", categories: "Ремонт квартир", description: "Цены на ремонт квартир в Москве и области" },
-  { id: "site_7", url: "https://kronotech.ru/stroitelnye-raboty/montazh-inzhenernyh-sistem", categories: "Инженерные системы", description: "Монтаж инженерных систем" },
   { id: "1770111963115", url: "https://garantstroikompleks.ru/prajs-list", categories: "АР, КР, ВК (К), ВК (В), ОВ (Вент.), ОВ (Отоп.), АУПТ, ЭО, ЭС, ЭМ, СС", description: "Общестрой" },
   { id: "1770111983019", url: "https://stroyremdizayn.ru/almaznaya-rezka-betona", categories: "КР", description: "Алмазная резка бетона, стен и перекрытий" },
   { id: "1770111994637", url: "https://stroyremdizayn.ru/uslugi/santekhnika-vodosnabzhenie-i-kanalizaciya", categories: "ВК (В), ВК (К)", description: "Услуги сантехника, водоснабжение и канализация" },
