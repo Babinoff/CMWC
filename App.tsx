@@ -7,6 +7,7 @@ import { detectCategories } from "./utils/collisionParser";
 interface Discipline {
   id: string;
   code: string;
+  shortCodeKey: string;
   rank: number; // 1 (Hardest) to 6 (Easiest)
   nameKey: string;
   descKey: string;
@@ -181,6 +182,16 @@ const TRANSLATIONS = {
         matching: "Matching Works..."
     },
     disciplines: {
+        codes: {
+            ARCH: "ARCH",
+            STR: "STR",
+            PL: "PL",
+            HVAC: "HVAC",
+            FPS: "FPS",
+            ELEC: "ELEC",
+            ELV: "ELV",
+            AI: "AI"
+        },
         AR_WALLS_NAME: "Walls", AR_WALLS_DESC: "Architectural walls, partitions",
         AR_WALLS_KW: "brick, block, drywall, plaster, paint, dismantling, partition",
         
@@ -319,6 +330,16 @@ const TRANSLATIONS = {
         matching: "Подбор работ..."
     },
     disciplines: {
+        codes: {
+            ARCH: "АР",
+            STR: "КР",
+            PL: "ВК",
+            HVAC: "ОВ",
+            FPS: "АУПТ",
+            ELEC: "ЭОМ",
+            ELV: "СС",
+            AI: "АИ"
+        },
         AR_WALLS_NAME: "Стены", AR_WALLS_DESC: "Архитектурные стены, перегородки",
         AR_WALLS_KW: "кирпич, блок, гипсокартон, штукатурка, покраска, демонтаж, перегородка",
 
@@ -368,24 +389,24 @@ const TRANSLATIONS = {
 };
 
 const DISCIPLINES: Discipline[] = [
-  { id: "AR_WALLS", code: "АР (Стены)", rank: 2, nameKey: "AR_WALLS_NAME", descKey: "AR_WALLS_DESC", keywordsKey: "AR_WALLS_KW" },
-  { id: "AR_DOORS", code: "АР (Двери/Окна)", rank: 2, nameKey: "AR_DOORS_NAME", descKey: "AR_DOORS_DESC", keywordsKey: "AR_DOORS_KW" },
-  { id: "AR_FACADE", code: "АР (Фасад)", rank: 2, nameKey: "AR_FACADE_NAME", descKey: "AR_FACADE_DESC", keywordsKey: "AR_FACADE_KW" },
-  { id: "AR_ROOF", code: "АР (Кровля)", rank: 2, nameKey: "AR_ROOF_NAME", descKey: "AR_ROOF_DESC", keywordsKey: "AR_ROOF_KW" },
-  { id: "KR_WALLS", code: "КР", rank: 1, nameKey: "KR_WALLS_NAME", descKey: "KR_WALLS_DESC", keywordsKey: "KR_WALLS_KW" },
-  { id: "KR_COLS", code: "КР", rank: 1, nameKey: "KR_COLS_NAME", descKey: "KR_COLS_DESC", keywordsKey: "KR_COLS_KW" },
-  { id: "KR_SLABS", code: "КР", rank: 1, nameKey: "KR_SLABS_NAME", descKey: "KR_SLABS_DESC", keywordsKey: "KR_SLABS_KW" },
-  { id: "KR_BEAMS", code: "КР", rank: 1, nameKey: "KR_BEAMS_NAME", descKey: "KR_BEAMS_DESC", keywordsKey: "KR_BEAMS_KW" },
-  { id: "VK_K", code: "ВК (К)", rank: 3, nameKey: "VK_K_NAME", descKey: "VK_K_DESC", keywordsKey: "VK_K_KW" },
-  { id: "VK_V", code: "ВК (В)", rank: 5, nameKey: "VK_V_NAME", descKey: "VK_V_DESC", keywordsKey: "VK_V_KW" },
-  { id: "OV_VENT", code: "ОВ (Вент.)", rank: 4, nameKey: "OV_VENT_NAME", descKey: "OV_VENT_DESC", keywordsKey: "OV_VENT_KW" },
-  { id: "OV_HEAT", code: "ОВ (Отоп.)", rank: 5, nameKey: "OV_HEAT_NAME", descKey: "OV_HEAT_DESC", keywordsKey: "OV_HEAT_KW" },
-  { id: "OV_ITP", code: "ОВ (ИТП)", rank: 5, nameKey: "OV_ITP_NAME", descKey: "OV_ITP_DESC", keywordsKey: "OV_ITP_KW" },
-  { id: "AUPT_PIPE", code: "АУПТ", rank: 5, nameKey: "AUPT_PIPE_NAME", descKey: "AUPT_PIPE_DESC", keywordsKey: "AUPT_PIPE_KW" },
-  { id: "AUPT_SPR", code: "АУПТ", rank: 5, nameKey: "AUPT_SPR_NAME", descKey: "AUPT_SPR_DESC", keywordsKey: "AUPT_SPR_KW" },
-  { id: "EOM", code: "ЭОМ", rank: 6, nameKey: "EOM_NAME", descKey: "EOM_DESC", keywordsKey: "EOM_KW" },
-  { id: "SS", code: "СС", rank: 6, nameKey: "SS_NAME", descKey: "SS_DESC", keywordsKey: "SS_KW" },
-  { id: "AI", code: "АИ", rank: 6, nameKey: "AI_NAME", descKey: "AI_DESC", keywordsKey: "AI_KW" },
+  { id: "AR_WALLS", code: "АР (Стены)", shortCodeKey: "ARCH", rank: 2, nameKey: "AR_WALLS_NAME", descKey: "AR_WALLS_DESC", keywordsKey: "AR_WALLS_KW" },
+  { id: "AR_DOORS", code: "АР (Двери/Окна)", shortCodeKey: "ARCH", rank: 2, nameKey: "AR_DOORS_NAME", descKey: "AR_DOORS_DESC", keywordsKey: "AR_DOORS_KW" },
+  { id: "AR_FACADE", code: "АР (Фасад)", shortCodeKey: "ARCH", rank: 2, nameKey: "AR_FACADE_NAME", descKey: "AR_FACADE_DESC", keywordsKey: "AR_FACADE_KW" },
+  { id: "AR_ROOF", code: "АР (Кровля)", shortCodeKey: "ARCH", rank: 2, nameKey: "AR_ROOF_NAME", descKey: "AR_ROOF_DESC", keywordsKey: "AR_ROOF_KW" },
+  { id: "KR_WALLS", code: "КР", shortCodeKey: "STR", rank: 1, nameKey: "KR_WALLS_NAME", descKey: "KR_WALLS_DESC", keywordsKey: "KR_WALLS_KW" },
+  { id: "KR_COLS", code: "КР", shortCodeKey: "STR", rank: 1, nameKey: "KR_COLS_NAME", descKey: "KR_COLS_DESC", keywordsKey: "KR_COLS_KW" },
+  { id: "KR_SLABS", code: "КР", shortCodeKey: "STR", rank: 1, nameKey: "KR_SLABS_NAME", descKey: "KR_SLABS_DESC", keywordsKey: "KR_SLABS_KW" },
+  { id: "KR_BEAMS", code: "КР", shortCodeKey: "STR", rank: 1, nameKey: "KR_BEAMS_NAME", descKey: "KR_BEAMS_DESC", keywordsKey: "KR_BEAMS_KW" },
+  { id: "VK_K", code: "ВК (К)", shortCodeKey: "PL", rank: 3, nameKey: "VK_K_NAME", descKey: "VK_K_DESC", keywordsKey: "VK_K_KW" },
+  { id: "VK_V", code: "ВК (В)", shortCodeKey: "PL", rank: 5, nameKey: "VK_V_NAME", descKey: "VK_V_DESC", keywordsKey: "VK_V_KW" },
+  { id: "OV_VENT", code: "ОВ (Вент.)", shortCodeKey: "HVAC", rank: 4, nameKey: "OV_VENT_NAME", descKey: "OV_VENT_DESC", keywordsKey: "OV_VENT_KW" },
+  { id: "OV_HEAT", code: "ОВ (Отоп.)", shortCodeKey: "HVAC", rank: 5, nameKey: "OV_HEAT_NAME", descKey: "OV_HEAT_DESC", keywordsKey: "OV_HEAT_KW" },
+  { id: "OV_ITP", code: "ОВ (ИТП)", shortCodeKey: "HVAC", rank: 5, nameKey: "OV_ITP_NAME", descKey: "OV_ITP_DESC", keywordsKey: "OV_ITP_KW" },
+  { id: "AUPT_PIPE", code: "АУПТ", shortCodeKey: "FPS", rank: 5, nameKey: "AUPT_PIPE_NAME", descKey: "AUPT_PIPE_DESC", keywordsKey: "AUPT_PIPE_KW" },
+  { id: "AUPT_SPR", code: "АУПТ", shortCodeKey: "FPS", rank: 5, nameKey: "AUPT_SPR_NAME", descKey: "AUPT_SPR_DESC", keywordsKey: "AUPT_SPR_KW" },
+  { id: "EOM", code: "ЭОМ", shortCodeKey: "ELEC", rank: 6, nameKey: "EOM_NAME", descKey: "EOM_DESC", keywordsKey: "EOM_KW" },
+  { id: "SS", code: "СС", shortCodeKey: "ELV", rank: 6, nameKey: "SS_NAME", descKey: "SS_DESC", keywordsKey: "SS_KW" },
+  { id: "AI", code: "АИ", shortCodeKey: "AI", rank: 6, nameKey: "AI_NAME", descKey: "AI_DESC", keywordsKey: "AI_KW" },
 ];
 
 const DEFAULT_PARSING_SITES: ParsingSite[] = [
@@ -1038,7 +1059,8 @@ export default function App() {
           ...d,
           name: t(`disciplines.${d.nameKey}`),
           description: t(`disciplines.${d.descKey}`),
-          keywords: t(`disciplines.${d.keywordsKey}`)
+          keywords: t(`disciplines.${d.keywordsKey}`),
+          displayCode: t(`disciplines.codes.${d.shortCodeKey}`)
       }));
   }, [settings.language, t]);
 
@@ -1737,7 +1759,7 @@ export default function App() {
             return (
                 <div key={d.id} className="sticky top-0 z-20 p-2 text-center text-sm border-b border-r border-gray-200 flex flex-col items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-24" style={{ backgroundColor: style.bg }}>
                     <span className="font-bold text-sm md:text-base" style={{ color: style.text }}>
-                        {d.code}
+                        {d.displayCode}
                         {siteCount > 0 && <span className="ml-1 text-[10px] opacity-80">({siteCount})</span>}
                     </span>
                     <span className="text-[10px] leading-tight mt-1 opacity-80 max-w-[90px] truncate hidden md:block" style={{ color: style.text }} title={d.name}>{d.name}</span>
