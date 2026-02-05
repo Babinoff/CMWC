@@ -1523,14 +1523,14 @@ export default function App() {
             type: 'load',
             total: discs.length, 
             current: i + 1, 
-            label: `${t('btnLoading')} ${d.code}...` 
+            label: `${t('btnLoading')} ${d.displayCode} ${d.name}...` 
         });
 
         try {
             await processLoadWorks(d.id);
             successCount++;
         } catch (e) {
-            console.error(`Bulk load error for ${d.code}`, e);
+            console.error(`Bulk load error for ${d.displayCode}`, e);
             failCount++;
         }
         
@@ -1596,7 +1596,7 @@ export default function App() {
             type: 'gen',
             total: pendingCells.length, 
             current: i + 1, 
-            label: `${t('btnThinking')} ${r.code}:${c.code}...` 
+            label: `${t('btnThinking')} ${r.displayCode}:${c.displayCode}...` 
         });
 
         try {
@@ -1774,6 +1774,7 @@ export default function App() {
           const totalWorks = rowWorks.length;
           const acceptedWorks = rowWorks.filter(w => w.status === 'accepted').length;
           const isSelectedRow = (type === "collision" && selectedRowId === r.id) || (type === "cost" && selectedCell?.r === r.id);
+          const siteCount = settings.parsingSites?.filter(s => s.categories && s.categories.includes(r.code)).length || 0;
           
           return (
           <React.Fragment key={r.id}>
@@ -1798,7 +1799,10 @@ export default function App() {
                )}
 
                <div className="flex flex-col items-start px-1 md:px-2 w-full">
-                    <span style={{ color: style.text }} className="relative z-10 text-sm md:text-base">{r.code}</span>
+                    <span style={{ color: style.text }} className="relative z-10 text-sm md:text-base">
+                        {r.displayCode}
+                        {siteCount > 0 && <span className="ml-1 text-[10px] opacity-80">({siteCount})</span>}
+                    </span>
                     <span className="text-[10px] font-normal opacity-80 truncate max-w-full relative z-10 hidden md:block" style={{ color: style.text }} title={r.name}>{r.name}</span>
                </div>
                
@@ -2038,7 +2042,7 @@ export default function App() {
              {selectedCell ? (
                  <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
                     <span className="font-medium text-gray-500">
-                        {t('selected')}: <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.r)?.code}</span> vs <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.c)?.code}</span>
+                        {t('selected')}: <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.r)?.displayCode}</span> vs <span className="text-blue-600 font-bold">{localizedDisciplines.find(d=>d.id===selectedCell.c)?.displayCode}</span>
                     </span>
                     <div className="hidden md:block h-4 w-px bg-gray-300 mx-2"></div>
                     <Button onClick={handleGenScenarios} disabled={!!currentCellLoading} className="w-full md:w-auto justify-center">
@@ -2103,7 +2107,7 @@ export default function App() {
                          <div className="bg-white border-l-4 border-l-blue-500 border rounded shadow p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => setPanelOpen(true)}>
                              <div className="flex flex-col">
                                 <span className="text-sm font-semibold text-gray-700">
-                                    {t('worksPanel')}: {localizedDisciplines.find(d => d.id === selectedRowId)?.code} <span className="text-gray-400 font-normal">({works.filter(w => w.categoryId === selectedRowId).length} items)</span>
+                                    {t('worksPanel')}: {localizedDisciplines.find(d => d.id === selectedRowId)?.displayCode} <span className="text-gray-400 font-normal">({works.filter(w => w.categoryId === selectedRowId).length} items)</span>
                                 </span>
                                 {currentRowLoading && <span className="text-xs text-blue-500 font-medium animate-pulse">{currentRowLoading.step} ({Math.round(currentRowLoading.progress)}%)</span>}
                              </div>
@@ -2124,7 +2128,7 @@ export default function App() {
                                 >
                                     {isMobileExpanded ? "▼" : "▲"}
                                 </button>
-                                {t('worksPanel')}: {localizedDisciplines.find(d => d.id === selectedRowId)?.code} - {localizedDisciplines.find(d => d.id === selectedRowId)?.name}
+                                {t('worksPanel')}: {localizedDisciplines.find(d => d.id === selectedRowId)?.displayCode} - {localizedDisciplines.find(d => d.id === selectedRowId)?.name}
                                 {currentRowLoading && <span className="text-xs font-normal text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{currentRowLoading.step}</span>}
                             </h3>
                             <div className="flex items-center gap-4">
@@ -2189,7 +2193,7 @@ export default function App() {
                         {!panelOpen && (
                             <div className="bg-white border-l-4 border-l-blue-500 border rounded shadow p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => setPanelOpen(true)}>
                                 <div className="flex flex-col">
-                                    <span className="text-sm font-semibold text-gray-700">{t('scenarios')}: {localizedDisciplines.find(d => d.id === selectedCell.r)?.code} vs {localizedDisciplines.find(d => d.id === selectedCell.c)?.code}</span>
+                                    <span className="text-sm font-semibold text-gray-700">{t('scenarios')}: {localizedDisciplines.find(d => d.id === selectedCell.r)?.displayCode} vs {localizedDisciplines.find(d => d.id === selectedCell.c)?.displayCode}</span>
                                     {currentCellLoading && <span className="text-xs text-blue-500 font-medium animate-pulse">{t('steps.generating')} ({Math.round(currentCellLoading.progress)}%)</span>}
                                 </div>
                                 <div className="flex items-center gap-2 text-blue-600 text-sm font-medium"><span>{t('showPanel')}</span><ToggleButton open={false} onClick={() => setPanelOpen(true)} /></div>
@@ -2357,8 +2361,8 @@ export default function App() {
                                                      <span className="bg-blue-50 text-blue-700 px-1.5 rounded">{f.collisionCount}</span>
                                                  </div>
                                                  <div className="mt-1 flex flex-wrap gap-1">
-                                                     {r && <span className="text-[10px] bg-gray-100 border px-1 rounded">{r.code}</span>}
-                                                     {c && <span className="text-[10px] bg-gray-100 border px-1 rounded">{c.code}</span>}
+                                                     {r && <span className="text-[10px] bg-gray-100 border px-1 rounded">{r.displayCode}</span>}
+                                                    {c && <span className="text-[10px] bg-gray-100 border px-1 rounded">{c.displayCode}</span>}
                                                      {!r && !c && <span className="text-[10px] text-red-400">Unmapped</span>}
                                                  </div>
                                              </div>
