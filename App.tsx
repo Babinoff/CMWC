@@ -969,6 +969,7 @@ const ToggleButton = ({ open, onClick }: { open: boolean, onClick: () => void })
 export default function App() {
   // --- State ---
   const [activeTab, setActiveTab] = useState<"collision" | "cost" | "import" | "settings" | "logs">("collision");
+  const [selectedImportFileId, setSelectedImportFileId] = useState<string | null>(null);
   const [importedFiles, setImportedFiles] = useState<ImportedFile[]>(() => {
     try {
       const saved = localStorage.getItem("cmwc_imported_files");
@@ -1836,8 +1837,15 @@ export default function App() {
               } else if (type === "import") {
                   const importData = calculateImportCost(r.id, c.id);
                   const hasData = importData && importData.collisionCount > 0;
+                  const isRelatedToSelectedFile = selectedImportFileId && importedFiles.some(f => 
+                      f.id === selectedImportFileId && (
+                          (f.rowId === r.id && f.colId === c.id) || 
+                          (f.rowId === c.id && f.colId === r.id)
+                      )
+                  );
+
                   return (
-                      <div key={c.id} className={`border-b border-r border-gray-200 p-1 flex flex-col items-center justify-center text-sm h-[var(--matrix-cell-height)] hover:bg-gray-50 transition-colors ${hasData ? 'bg-indigo-50' : ''}`}>
+                      <div key={c.id} className={`border-b border-r border-gray-200 p-1 flex flex-col items-center justify-center text-sm h-[var(--matrix-cell-height)] hover:bg-gray-50 transition-colors relative ${isRelatedToSelectedFile ? 'bg-yellow-100 ring-2 ring-yellow-500 z-10' : hasData ? 'bg-indigo-50' : ''}`}>
                           {hasData ? (
                               <>
                                   <span className="font-bold text-gray-800 text-base">{importData.collisionCount}</span>
@@ -2339,33 +2347,37 @@ export default function App() {
                  </div>
 
                  <div className="flex-1 flex overflow-hidden">
-                     <div className="w-80 flex-none bg-white border-r flex flex-col z-10 hidden md:flex">
-                         <div className="p-3 border-b bg-gray-50 font-bold text-gray-700 text-sm flex justify-between items-center">
+                     <div className="w-32 flex-none bg-white border-r flex flex-col z-10 hidden md:flex">
+                         <div className="p-2 border-b bg-gray-50 font-bold text-gray-700 text-xs flex justify-between items-center">
                              <span>{t('fileName')}</span>
-                             <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">{importedFiles.length}</span>
+                             <span className="bg-gray-200 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-full">{importedFiles.length}</span>
                          </div>
                          <div className="flex-1 overflow-y-auto">
                              {importedFiles.length === 0 ? (
-                                 <div className="p-8 text-center text-gray-400 text-sm">{t('noFiles')}</div>
+                                 <div className="p-4 text-center text-gray-400 text-xs">{t('noFiles')}</div>
                              ) : (
                                  <div className="divide-y divide-gray-100">
                                      {importedFiles.map(f => {
                                          const r = localizedDisciplines.find(d => d.id === f.rowId);
                                          const c = localizedDisciplines.find(d => d.id === f.colId);
                                          return (
-                                             <div key={f.id} className="p-3 hover:bg-gray-50 group">
+                                             <div 
+                                                key={f.id} 
+                                                className={`p-2 hover:bg-gray-50 group cursor-pointer border-l-4 transition-colors ${selectedImportFileId === f.id ? 'bg-blue-50 border-blue-500' : 'border-transparent'}`}
+                                                onClick={() => setSelectedImportFileId(selectedImportFileId === f.id ? null : f.id)}
+                                             >
                                                  <div className="flex justify-between items-start mb-1">
-                                                     <div className="font-medium text-sm text-gray-900 truncate max-w-[180px]" title={f.filename}>{f.filename}</div>
-                                                     <button onClick={() => handleDeleteImportedFile(f.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                                                     <div className="font-medium text-xs text-gray-900 truncate max-w-[80px]" title={f.filename}>{f.filename}</div>
+                                                     <button onClick={() => handleDeleteImportedFile(f.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs">✕</button>
                                                  </div>
-                                                 <div className="flex justify-between items-center text-xs text-gray-500">
+                                                 <div className="flex justify-between items-center text-[10px] text-gray-500">
                                                      <span>{new Date(f.timestamp).toLocaleTimeString()}</span>
-                                                     <span className="bg-blue-50 text-blue-700 px-1.5 rounded">{f.collisionCount}</span>
+                                                     <span className="bg-blue-50 text-blue-700 px-1 rounded">{f.collisionCount}</span>
                                                  </div>
                                                  <div className="mt-1 flex flex-wrap gap-1">
-                                                     {r && <span className="text-[10px] bg-gray-100 border px-1 rounded">{r.displayCode}</span>}
-                                                    {c && <span className="text-[10px] bg-gray-100 border px-1 rounded">{c.displayCode}</span>}
-                                                     {!r && !c && <span className="text-[10px] text-red-400">Unmapped</span>}
+                                                     {r && <span className="text-[9px] bg-gray-100 border px-1 rounded">{r.displayCode}</span>}
+                                                    {c && <span className="text-[9px] bg-gray-100 border px-1 rounded">{c.displayCode}</span>}
+                                                     {!r && !c && <span className="text-[9px] text-red-400">Unmapped</span>}
                                                  </div>
                                              </div>
                                          );
