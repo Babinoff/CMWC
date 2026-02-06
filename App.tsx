@@ -319,8 +319,8 @@ const TRANSLATIONS = {
     automationLabel: "Включить полную автоматизацию",
     automationHint: "Разрешает кнопки массовых операций. Осторожно: большой расход токенов.",
     btnBulkLoad: "Загрузить всё (Авто)",
-    btnBulkGen: "Сгенер. всё (Авто)",
-    btnBulkMatch: "Подбор всех (Авто)",
+    btnBulkGen: "Сгенерировать все сценарии",
+    btnBulkMatch: "Подобрать все работы",
     bulkLoadConfirm: "Это запустит загрузку работ для ВСЕХ категорий по очереди. Это может занять время и потратить много токенов. Продолжить?",
     bulkGenConfirm: "Это запустит генерацию сценариев для ВСЕХ ячеек матрицы. Продолжить?",
     bulkMatchConfirm: "Это запустит подбор работ для ВСЕХ сценариев, где работы еще не назначены. Продолжить?",
@@ -1911,7 +1911,7 @@ export default function App() {
                  const displayCurrency = getCurrencySymbol(settings.language);
 
                  let cellStyle: React.CSSProperties = {};
-                 if (!isSelected && !isCellLoading && costData && maxMatrixCost > 0) {
+                 if (!isCellLoading && costData && maxMatrixCost > 0) {
                     const ratio = Math.min(costData.max / maxMatrixCost, 1);
                     // Purple heat map to avoid conflict with KR (Red) and other disciplines
                     cellStyle = { backgroundColor: `rgba(147, 51, 234, ${ratio * 0.5})` };
@@ -1924,7 +1924,7 @@ export default function App() {
                     key={c.id} 
                     style={cellStyle}
                     className={`border-b border-r border-gray-200 p-1 md:p-2 flex flex-col items-center justify-center cursor-pointer transition-all h-[var(--matrix-cell-height)] relative overflow-hidden
-                        ${isSelected ? 'bg-blue-100 ring-inset ring-2 ring-blue-600 z-0' : 'hover:bg-gray-50'}
+                        ${isSelected ? 'ring-inset ring-2 ring-blue-600 z-0' : 'hover:bg-gray-50'}
                         ${isCellLoading ? 'bg-blue-50' : ''}
                     `}
                     onClick={() => {
@@ -2075,9 +2075,17 @@ export default function App() {
                     </div>
                 ) : (
                     settings.enableAutomation && (
-                        <Button variant="secondary" onClick={handleBulkLoadAll} title={t('automationHint')} className="px-3 py-1 text-xs whitespace-nowrap">
-                            {t('btnBulkLoad')}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button variant="secondary" onClick={handleBulkLoadAll} title={t('automationHint')} className="px-3 py-1 text-xs whitespace-nowrap">
+                                {t('btnBulkLoad')}
+                            </Button>
+                            <Button variant="secondary" onClick={handleBulkGenerateAll} className="px-3 py-1 text-xs whitespace-nowrap">
+                                {t('btnBulkGen')}
+                            </Button>
+                            <Button variant="secondary" onClick={handleBulkMatchAll} className="px-3 py-1 text-xs whitespace-nowrap">
+                                {t('btnBulkMatch')}
+                            </Button>
+                        </div>
                     )
                 )}
             </div>
