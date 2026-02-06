@@ -188,6 +188,7 @@ const TRANSLATIONS = {
             STR: "STR",
             PL: "PL",
             HVAC: "HVAC",
+            ITP: "ITP",
             FPS: "FPS",
             ELEC: "ELEC",
             ELV: "ELV",
@@ -337,6 +338,7 @@ const TRANSLATIONS = {
             STR: "КР",
             PL: "ВК",
             HVAC: "ОВ",
+            ITP: "ИТП",
             FPS: "АУПТ",
             ELEC: "ЭОМ",
             ELV: "СС",
@@ -403,7 +405,7 @@ const DISCIPLINES: Discipline[] = [
   { id: "VK_V", code: "ВК (В)", shortCodeKey: "PL", rank: 5, nameKey: "VK_V_NAME", descKey: "VK_V_DESC", keywordsKey: "VK_V_KW" },
   { id: "OV_VENT", code: "ОВ (Вент.)", shortCodeKey: "HVAC", rank: 4, nameKey: "OV_VENT_NAME", descKey: "OV_VENT_DESC", keywordsKey: "OV_VENT_KW" },
   { id: "OV_HEAT", code: "ОВ (Отоп.)", shortCodeKey: "HVAC", rank: 5, nameKey: "OV_HEAT_NAME", descKey: "OV_HEAT_DESC", keywordsKey: "OV_HEAT_KW" },
-  { id: "OV_ITP", code: "ОВ (ИТП)", shortCodeKey: "HVAC", rank: 5, nameKey: "OV_ITP_NAME", descKey: "OV_ITP_DESC", keywordsKey: "OV_ITP_KW" },
+  { id: "OV_ITP", code: "ОВ (ИТП)", shortCodeKey: "ITP", rank: 5, nameKey: "OV_ITP_NAME", descKey: "OV_ITP_DESC", keywordsKey: "OV_ITP_KW" },
   { id: "AUPT_PIPE", code: "АУПТ", shortCodeKey: "FPS", rank: 5, nameKey: "AUPT_PIPE_NAME", descKey: "AUPT_PIPE_DESC", keywordsKey: "AUPT_PIPE_KW" },
   { id: "AUPT_SPR", code: "АУПТ", shortCodeKey: "FPS", rank: 5, nameKey: "AUPT_SPR_NAME", descKey: "AUPT_SPR_DESC", keywordsKey: "AUPT_SPR_KW" },
   { id: "EOM", code: "ЭОМ", shortCodeKey: "ELEC", rank: 6, nameKey: "EOM_NAME", descKey: "EOM_DESC", keywordsKey: "EOM_KW" },
@@ -2236,7 +2238,7 @@ export default function App() {
 
         {activeTab === "cost" && (
              <div className="h-full flex flex-col gap-4">
-                 <div className={`flex flex-col transition-all duration-300 ease-in-out ${selectedCell && panelOpen ? 'h-1/2' : 'h-full'}`}>
+                 <div className={`flex flex-col transition-all duration-300 ease-in-out ${selectedCell && panelOpen ? 'flex-none h-[calc(50%-0.5rem)] md:flex-1 md:h-auto md:min-h-0' : 'h-full'}`}>
                      <h2 className="text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider flex justify-between items-center">
                         <span>{t('costMatrix')}</span>
                         {selectedCell && <span className="text-xs font-normal text-gray-400">{t('toggleDetail')}</span>}
@@ -2254,11 +2256,30 @@ export default function App() {
                                 <div className="flex items-center gap-2 text-blue-600 text-sm font-medium"><span>{t('showPanel')}</span><ToggleButton open={false} onClick={() => setPanelOpen(true)} /></div>
                             </div>
                         )}
-                        <div className={`flex flex-col md:flex-row gap-4 transition-all duration-300 ease-in-out 
-                            ${panelOpen ? (isMobileExpanded ? 'fixed inset-0 z-50 h-full bg-white p-2' : 'h-1/2 opacity-100') : 'h-0 opacity-0 overflow-hidden'}
-                            ${isMobileExpanded ? 'md:relative md:h-1/2 md:inset-auto md:z-auto md:bg-transparent md:p-0' : ''}
+                        <div className={`flex flex-col transition-all duration-300 ease-in-out 
+                            ${panelOpen ? (isMobileExpanded ? 'fixed inset-0 z-50 h-full bg-white p-2' : 'h-[calc(50%-0.5rem)] md:h-auto md:flex-none opacity-100') : 'h-0 opacity-0 overflow-hidden'}
+                            ${isMobileExpanded ? 'md:relative md:h-auto md:flex-none md:inset-auto md:z-auto md:bg-transparent md:p-0' : ''}
                         `}>
-                            <div className="w-full md:w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
+                            <div className={`grid transition-all duration-500 ease-in-out ${activeScenario ? 'grid-rows-[1fr] opacity-100 mb-4' : 'grid-rows-[0fr] opacity-0 mb-0'}`}>
+                                <div className="overflow-hidden">
+                                    {activeScenario && (
+                                        <div className="flex-none bg-white border rounded shadow-sm p-3">
+                                            <div className="flex flex-col md:flex-row gap-4">
+                                                <div className="w-full md:w-1/3">
+                                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{t('scenarioName')}</label>
+                                                    <Input value={activeScenario.name} onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, name: e.target.value} : s))}/>
+                                                </div>
+                                                <div className="w-full md:w-2/3">
+                                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{t('description')}</label>
+                                                    <textarea className="w-full bg-white text-gray-900 border border-gray-300 rounded px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 h-[80px] min-h-[80px] resize-y" value={activeScenario.description} onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, description: e.target.value} : s))}/>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className={`flex flex-col md:flex-row gap-4 min-h-0 ${isMobileExpanded ? 'flex-1' : 'flex-1 md:flex-none md:h-[45vh]'}`}>
+                                <div className="w-full md:w-1/2 bg-white border rounded shadow-sm flex flex-col relative overflow-hidden">
                                 {currentCellLoading ? (
                                     <div className="absolute inset-0 bg-white z-20 flex flex-col items-center justify-center">
                                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
@@ -2300,7 +2321,7 @@ export default function App() {
                                     </>
                                 )}
                             </div>
-                            <div className="w-full md:w-1/2 bg-white border rounded shadow-sm flex flex-col relative">
+                            <div className="w-full md:w-1/2 bg-white border rounded shadow-sm flex flex-col relative overflow-hidden">
                                 {activeScenario ? (
                                     <>
                                         {currentMatchLoading && (
@@ -2309,10 +2330,7 @@ export default function App() {
                                                 <span className="text-sm font-bold text-blue-700 animate-pulse">{currentMatchLoading.step}</span>
                                             </div>
                                         )}
-                                        <div className="p-3 border-b bg-gray-50 space-y-3">
-                                            <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">{t('scenarioName')}</label><Input value={activeScenario.name} onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, name: e.target.value} : s))}/></div>
-                                            <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">{t('description')}</label><textarea className="w-full bg-white text-gray-900 border border-gray-300 rounded px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[60px]" rows={4} value={activeScenario.description} onChange={(e:any) => setScenarios(prev => prev.map(s => s.id === activeScenario.id ? {...s, description: e.target.value} : s))}/></div>
-                                        </div>
+
                                         <div className="p-2 border-b bg-gray-100 flex flex-wrap gap-2 items-center">
                                             <select className="flex-1 min-w-[150px] bg-white text-gray-900 border border-gray-300 rounded px-2 py-2 text-xs focus:outline-none focus:border-blue-500" value={workToAddId} onChange={(e) => setWorkToAddId(e.target.value)}>
                                                 <option value="">{t('addManual')}</option>
@@ -2343,6 +2361,7 @@ export default function App() {
                                 ) : (
                                     <div className="flex-1 flex items-center justify-center text-gray-400 bg-gray-50"><p>{t('selectScenario')}</p></div>
                                 )}
+                            </div>
                             </div>
                         </div>
                      </>

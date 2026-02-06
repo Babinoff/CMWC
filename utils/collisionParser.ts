@@ -8,7 +8,7 @@ export const mapPathToCategory = (path: string): string | null => {
     if (p.includes("СС") || p.includes("АПС") || p.includes("ПОЖАРН") || p.includes("LOW CURRENT")) return "SS";
 
     // OV - ITP
-    if (p.includes("ИТП") || p.includes("HEAT POINT") || p.includes("ТЕПЛОВОЙ ПУНКТ")) return "OV_ITP";
+    if (p.includes("ИТП") || p.includes("ITP") || p.includes("HEAT POINT") || p.includes("ТЕПЛОВОЙ ПУНКТ")) return "OV_ITP";
 
     // AR - Facade / Roof / Walls
     if (p.includes("ФАСАД") || p.includes("FACADE")) return "AR_FACADE";
@@ -50,6 +50,8 @@ export const codeMap: Record<string, string[]> = {
     "VK": ["VK_K", "VK_V"],
     "ОВ": ["OV_VENT", "OV_HEAT", "OV_ITP"],
     "OV": ["OV_VENT", "OV_HEAT", "OV_ITP"],
+    "ИТП": ["OV_ITP"],
+    "ITP": ["OV_ITP"],
     "АУПТ": ["AUPT_PIPE", "AUPT_SPR"],
     "AUPT": ["AUPT_PIPE", "AUPT_SPR"],
     "ЭОМ": ["EOM"],
@@ -81,7 +83,7 @@ export const refinement = (possibleIds: string[], text: string) => {
     if (possibleIds.includes("KR_BEAMS") && (textLower.includes("балк") || textLower.includes("ригел"))) return "KR_BEAMS";
     
     // OV Refinement
-    if (possibleIds.includes("OV_ITP") && (textLower.includes("итп") || textLower.includes("heat point"))) return "OV_ITP";
+    if (possibleIds.includes("OV_ITP") && (textLower.includes("итп") || textLower.includes("itp") || textLower.includes("heat point"))) return "OV_ITP";
     if (possibleIds.includes("OV_VENT") && (textLower.includes("вент") || textLower.includes("воздух"))) return "OV_VENT";
     if (possibleIds.includes("OV_HEAT") && (textLower.includes("отоп") || textLower.includes("тепл"))) return "OV_HEAT";
 
@@ -134,7 +136,7 @@ export const detectCategories = (filename: string, xmlDoc?: Document): { r: stri
     }
 
     // --- Level 2: Filename Parsing (Fallback) ---
-    const parts = filename.split(/[-_]/).map(p => p.trim().toUpperCase());
+    const parts = filename.split(/[-_+]/).map(p => p.trim().toUpperCase());
     let r: string | null = null;
     let c: string | null = null;
     

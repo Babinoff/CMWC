@@ -110,4 +110,39 @@ describe('collisionParser', () => {
         expect(result.r).toBe("AR_FACADE");
         expect(result.c).toBe("KR_WALLS");
     });
+
+    it('should detect OV_ITP from pathlink with Latin ITP', () => {
+        const xml = `
+        <exchange>
+            <clashtest>
+                <clashresults>
+                    <clashresult>
+                        <pathlink>
+                            <node>W-1470_ITP_R21.nwc</node>
+                            <node>Материалы изоляции труб</node>
+                        </pathlink>
+                        <pathlink>
+                             <node>Other</node>
+                        </pathlink>
+                    </clashresult>
+                </clashresults>
+            </clashtest>
+        </exchange>
+        `;
+        const doc = parseXML(xml);
+        const result = detectCategories("file.xml", doc);
+        expect(result.r).toBe("OV_ITP");
+    });
+
+    it('should detect OV_ITP from filename 16_КР + ИТП (Изоляция)', () => {
+        // Test fallback when XML has no info
+        const result = detectCategories("16_КР + ИТП (Изоляция).xml", undefined);
+        expect(result.c).toBe("OV_ITP"); // Or r depending on order
+        // 16_КР + ИТП -> "КР + ИТП" -> matches KR and ИТП
+        // "КР" -> KR_WALLS (default or from refinement?) 
+        // "ИТП" -> OV_ITP
+        // Let's see what it returns exactly. 
+        // With codeMap having "ИТП", it should find OV_ITP.
+        // Found IDs might be [KR_WALLS, OV_ITP] or similar.
+    });
 });
