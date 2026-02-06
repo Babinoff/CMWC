@@ -98,6 +98,14 @@ For a given cell (Row R, Col C):
 
 ### Step 5: Testing & Verification
 - [x] Upload the provided example file. (Verified via logic implementation and unit tests pass)
+
+## 6. UI Enhancements (User Request)
+- [x] Make selected file in the list visually explicit (distinct background/border).
+- [x] Allow resizing of the file list column width (default 250px).
+- [x] Add "Hide unaffected" toggle to show only columns/rows relevant to the selected file.
+- [x] Add category-colored lines to selected files in the file list.
+- [x] Halve the default width of the file list column (from 250px to 125px).
+- [x] Ensure filename visibility depends on the file list column width (remove fixed truncation).
 -   Verify correct collision count (177 resolved? or total 181? XML says: `summary total="181" ... resolved="177"` - usually we care about *active* or *total*? The XML has `status="active"` for the clash results listed. The summary says `active="3"`. But there are many `clashresult` elements.
     -   *Correction*: The user wants "mapping of collisions... that are in the file".
     -   I should count the `<clashresult>` elements present in the file.

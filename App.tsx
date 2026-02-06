@@ -119,6 +119,7 @@ const TRANSLATIONS = {
     worksPanel: "Works",
     showPanel: "Show Panel",
     hide: "Hide",
+    hideUnaffected: "Hide unaffected",
     table: {
       name: "Name",
       price: "Price",
@@ -267,6 +268,7 @@ const TRANSLATIONS = {
     worksPanel: "Работы",
     showPanel: "Показать панель",
     hide: "Скрыть",
+    hideUnaffected: "Скрыть незатронутые",
     table: {
       name: "Наименование",
       price: "Цена",
@@ -1037,6 +1039,9 @@ export default function App() {
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
   const [newSite, setNewSite] = useState<Partial<ParsingSite>>({});
   const [parsingMode, setParsingMode] = useState<'auto' | 'manual'>('manual');
+  const [fileListWidth, setFileListWidth] = useState(125);
+  const [hideUnaffected, setHideUnaffected] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   
   // Loading States
   const [loadingRows, setLoadingRows] = useState<Record<string, LoadingState>>({});
@@ -1048,6 +1053,30 @@ export default function App() {
   const abortOperation = useRef(false);
 
   const { startProgress, updateStep, stopProgress } = useProgressSimulator();
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+        if (isResizing) {
+            setFileListWidth(prev => {
+                const newWidth = prev + e.movementX;
+                return Math.max(150, Math.min(600, newWidth));
+            });
+        }
+    };
+    const handleMouseUp = () => {
+        setIsResizing(false);
+    };
+
+    if (isResizing) {
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
 
   const t = useCallback((key: string) => {
       const lang = settings.language || 'en';
@@ -1064,6 +1093,19 @@ export default function App() {
           displayCode: t(`disciplines.codes.${d.shortCodeKey}`)
       }));
   }, [settings.language, t]);
+
+  const filteredDisciplines = useMemo(() => {
+    if (activeTab === "import" && hideUnaffected && selectedImportFileId) {
+       const file = importedFiles.find(f => f.id === selectedImportFileId);
+       if (file) {
+           const affectedIds = [file.rowId, file.colId].filter(Boolean) as string[];
+           if (affectedIds.length > 0) {
+             return localizedDisciplines.filter(d => affectedIds.includes(d.id));
+           }
+       }
+    }
+    return localizedDisciplines;
+  }, [activeTab, hideUnaffected, selectedImportFileId, importedFiles, localizedDisciplines]);
 
   useEffect(() => {
     localStorage.setItem("cmwc_settings", JSON.stringify(settings));
@@ -1748,13 +1790,15 @@ export default function App() {
     return { min, max, count: cellScenarios.length };
   };
 
-  const renderMatrix = (type: "collision" | "cost" | "import") => (
+  const renderMatrix = (type: "collision" | "cost" | "import") => {
+    const disciplinesToRender = type === "import" ? filteredDisciplines : localizedDisciplines;
+    return (
     <div className="overflow-auto flex-1 bg-white border rounded shadow-sm relative">
-      <div className="grid min-w-[var(--matrix-min-width)]" style={{ gridTemplateColumns: `var(--matrix-first-col-width) repeat(${localizedDisciplines.length}, 1fr)` }}>
+      <div className="grid min-w-[var(--matrix-min-width)]" style={{ gridTemplateColumns: `var(--matrix-first-col-width) repeat(${disciplinesToRender.length}, 1fr)` }}>
         <div className="sticky top-0 left-0 z-30 bg-gray-100 p-2 md:p-3 font-bold text-xs text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 flex items-center justify-center shadow-sm h-[var(--matrix-header-height)] md:h-16">
           {t('table.name')}
         </div>
-        {localizedDisciplines.map(d => {
+        {disciplinesToRender.map(d => {
             const style = getDisciplineStyle(d);
             const siteCount = settings.parsingSites?.filter(s => s.categories && s.categories.includes(d.code)).length || 0;
             return (
@@ -1768,7 +1812,7 @@ export default function App() {
             );
         })}
 
-        {localizedDisciplines.map(r => {
+        {disciplinesToRender.map(r => {
           const style = getDisciplineStyle(r);
           const isRowLoading = loadingRows[r.id];
           const rowWorks = works.filter(w => w.categoryId === r.id);
@@ -1821,7 +1865,7 @@ export default function App() {
                )}
             </div>
 
-            {localizedDisciplines.map(c => {
+            {disciplinesToRender.map(c => {
               const isDiagonal = r.id === c.id;
               const cellKey = `${r.id}:${c.id}`;
               const isSelected = selectedCell?.r === r.id && selectedCell?.c === c.id;
@@ -1914,6 +1958,7 @@ export default function App() {
       </div>
     </div>
   );
+  };
 
   const availableWorksForScenario = useMemo(() => {
       if (!selectedCell) return [];
@@ -2326,6 +2371,15 @@ export default function App() {
                         <div className="text-sm text-gray-500 hidden md:block border-l pl-4">
                              {t('importDesc')}
                         </div>
+                        <label className="flex items-center gap-2 cursor-pointer bg-gray-50 px-3 py-1.5 rounded border hover:bg-gray-100 transition-colors ml-4">
+                            <input 
+                                type="checkbox" 
+                                checked={hideUnaffected} 
+                                onChange={(e) => setHideUnaffected(e.target.checked)}
+                                className="rounded text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm font-medium text-gray-700 select-none">{t('hideUnaffected')}</span>
+                        </label>
                      </div>
                      <div className="flex items-center gap-4">
                          <div className="text-right">
@@ -2347,7 +2401,14 @@ export default function App() {
                  </div>
 
                  <div className="flex-1 flex overflow-hidden">
-                     <div className="w-32 flex-none bg-white border-r flex flex-col z-10 hidden md:flex">
+                     <div style={{ width: fileListWidth }} className="flex-none bg-white border-r flex flex-col z-10 hidden md:flex relative group/sidebar">
+                         <div 
+                             className="absolute top-0 bottom-0 right-[-4px] w-2 cursor-col-resize z-50 hover:bg-blue-400/50 transition-colors"
+                             onMouseDown={(e) => {
+                                 e.preventDefault();
+                                 setIsResizing(true);
+                             }}
+                         />
                          <div className="p-2 border-b bg-gray-50 font-bold text-gray-700 text-xs flex justify-between items-center">
                              <span>{t('fileName')}</span>
                              <span className="bg-gray-200 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-full">{importedFiles.length}</span>
@@ -2360,25 +2421,44 @@ export default function App() {
                                      {importedFiles.map(f => {
                                          const r = localizedDisciplines.find(d => d.id === f.rowId);
                                          const c = localizedDisciplines.find(d => d.id === f.colId);
-                                         return (
+                                         const isSelected = selectedImportFileId === f.id;
+                                        
+                                        // Get styles for row and column to use their colors
+                                        const rStyle = r ? getDisciplineStyle(r) : null;
+                                        const cStyle = c ? getDisciplineStyle(c) : null;
+
+                                        return (
                                              <div 
                                                 key={f.id} 
-                                                className={`p-2 hover:bg-gray-50 group cursor-pointer border-l-4 transition-colors ${selectedImportFileId === f.id ? 'bg-blue-50 border-blue-500' : 'border-transparent'}`}
-                                                onClick={() => setSelectedImportFileId(selectedImportFileId === f.id ? null : f.id)}
-                                             >
-                                                 <div className="flex justify-between items-start mb-1">
-                                                     <div className="font-medium text-xs text-gray-900 truncate max-w-[80px]" title={f.filename}>{f.filename}</div>
-                                                     <button onClick={() => handleDeleteImportedFile(f.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs">✕</button>
-                                                 </div>
-                                                 <div className="flex justify-between items-center text-[10px] text-gray-500">
-                                                     <span>{new Date(f.timestamp).toLocaleTimeString()}</span>
-                                                     <span className="bg-blue-50 text-blue-700 px-1 rounded">{f.collisionCount}</span>
-                                                 </div>
-                                                 <div className="mt-1 flex flex-wrap gap-1">
-                                                     {r && <span className="text-[9px] bg-gray-100 border px-1 rounded">{r.displayCode}</span>}
-                                                    {c && <span className="text-[9px] bg-gray-100 border px-1 rounded">{c.displayCode}</span>}
-                                                     {!r && !c && <span className="text-[9px] text-red-400">Unmapped</span>}
-                                                 </div>
+                                                className={`p-2 hover:bg-gray-50 group cursor-pointer border-l-0 transition-all relative overflow-hidden ${
+                                                    isSelected 
+                                                    ? 'bg-blue-100 shadow-inner' 
+                                                    : 'border-transparent'
+                                                }`}
+                                                onClick={() => setSelectedImportFileId(isSelected ? null : f.id)}
+                                            >
+                                                {/* Colored indication lines */}
+                                                <div className="absolute left-0 top-0 bottom-0 w-1.5 flex flex-col z-10">
+                                                    {rStyle && <div className="flex-1" style={{ backgroundColor: rStyle.bg, borderRight: `1px solid ${rStyle.text}` }}></div>}
+                                                    {cStyle && <div className="flex-1" style={{ backgroundColor: cStyle.bg, borderRight: `1px solid ${cStyle.text}` }}></div>}
+                                                    {!rStyle && !cStyle && <div className="flex-1 bg-gray-200"></div>}
+                                                </div>
+
+                                                <div className="pl-3">
+                                                    <div className="flex justify-between items-start mb-1">
+                                                        <div className="font-medium text-xs text-gray-900 truncate" title={f.filename}>{f.filename}</div>
+                                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteImportedFile(f.id); }} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs ml-1 shrink-0">✕</button>
+                                                    </div>
+                                                    <div className="flex justify-between items-center text-[10px] text-gray-500">
+                                                        <span>{new Date(f.timestamp).toLocaleTimeString()}</span>
+                                                        <span className="bg-blue-50 text-blue-700 px-1 rounded">{f.collisionCount}</span>
+                                                    </div>
+                                                    <div className="mt-1 flex flex-wrap gap-1">
+                                                        {r && <span className="text-[9px] bg-gray-100 border px-1 rounded">{r.displayCode}</span>}
+                                                        {c && <span className="text-[9px] bg-gray-100 border px-1 rounded">{c.displayCode}</span>}
+                                                        {!r && !c && <span className="text-[9px] text-red-400">Unmapped</span>}
+                                                    </div>
+                                                </div>
                                              </div>
                                          );
                                      })}
